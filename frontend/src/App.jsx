@@ -1,0 +1,96 @@
+import React, { useEffect, useState } from "react";
+import { listRuns, getMetrics, getRun, injectFault, startRun } from "./api.js";
+
+const STAGE_COLORS = {
+  Seed: "#888780", Incubate: "#1D9E75", Image: "#1D9E75",
+  Count: "#888780", Decision: "#534AB7", Passage: "#BA7517",
+};
+const STATUS_COLORS = {
+  RUNNING: "#185FA5", WAITING: "#854F0B", PENDING: "#5F5E5A",
+  COMPLETED: "#3B6D11", FAILED: "#A32D2D",
+};
+
+function Bar({ value }) {
+  return (
+    <div className="bar">
+      <div className="bar-fill" style={{ width: `${Math.round(value * 100)}%` }} />
+      <span className="bar-label">{Math.round(value * 100)}%</span>
+    </div>
+  );
+}
+
+export default function App() {
+  const [runs, setRuns] = useState([]);
+  const [metrics, setMetrics] = useState({});
+  const [selected, setSelected] = useState(null);
+  const [detail, setDetail] = useState(null);
+
+  async function refresh() {
+    setRuns(await listRuns());
+    setMetrics(await getMetrics());
+    if (selected != null) setDetail(await getRun(selected));
+  }
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 2000);
+    return () => clearInterval(t);
+  }, [selected]);
+
+  return (
+    <div className="wrap">
+      <header>
+        <h1>CellFlow</h1>
+        <span className="sub">lab-workflow orchestrator</span>
+        <div className="metrics">
+          <span>{metrics.runs_active ?? 0} active</span>
+          <span>{metrics.runs_completed ?? 0} done</span>
+          <span className="fail">{metrics.runs_failed ?? 0} failed</span>
+          <span>{metrics.retries_total ?? 0} retries</span>
+          <span>{metrics.audit_events_total ?? 0} events</span>
+        </div>
+        <button onClick={async () => { await startRun(); refresh(); }}>+ Start run</button>
+      </header>
+
+      <div className="grid">
+        {runs.map((r) => (
+          <div
+            key={r.id}
+            className={`card ${selected === r.id ? "active" : ""}`}
+            onClick={() => setSelected(r.id)}
+          >
+            <div className="card-top">
+              <strong>{r.name}</strong>
+              <span className="status" style={{ background: STATUS_COLORS[r.status] }}>
+                {r.status}
+              </span>
+            </div>
+            <div className="stage" style={{ color: STAGE_COLORS[r.stage_name] }}>
+              {r.stage_name} · passage {r.passage_count}
+            </div>
+            <Bar value={r.confluence} />
+            <button
+              className="fault"
+              onClick={(e) => { e.stopPropagation(); injectFault(r.id); }}
+            >
+              Inject fault
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {detail && (
+        <div className="detail">
+          <h2>{detail.run.name} — audit log</h2>
+          <ul>
+            {detail.events.map((ev) => (
+              <li key={ev.id}>
+                <span className="ev-type">{ev.type}</span> {ev.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}

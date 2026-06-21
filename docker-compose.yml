@@ -1,0 +1,29 @@
+services:
+  orchestrator:
+    build: ./orchestrator
+    ports: ["8000:8000"]
+    environment:
+      - CV_SERVICE_URL=http://cv-service:8001
+      - CLOCK_FACTOR=4
+      - FAILURE_RATE=0.05
+      - SEED_ON_START=10
+    volumes: ["orchestrator-data:/data"]
+    depends_on: [cv-service]
+
+  cv-service:
+    build: ./cv-service
+    ports: ["8001:8001"]
+    environment:
+      - CV_MODE=stub
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host"
+    ports: ["5173:5173"]
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    volumes: ["./frontend:/app"]
+
+volumes:
+  orchestrator-data:
