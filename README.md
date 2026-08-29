@@ -62,6 +62,33 @@ cd orchestrator && python -m pytest -q
 The engine takes the current time as an argument, so the test drives hundreds of
 simulated ticks with no sleeping and asserts every run completes.
 
+## Database migrations
+
+The orchestrator applies Alembic migrations to `head` on startup. Alembic reads
+`DB_URL` through the application's Settings object, so set it before running a
+migration command. A legacy database created before Alembic is safely stamped at
+`head` only after its managed tables, columns, and indexes are validated; legacy
+step statuses are normalized before stamping. An incompatible legacy schema
+fails safely instead of being stamped. In-memory databases and
+`DB_MIGRATIONS_ENABLED=false` retain `SQLModel.metadata.create_all()` as a
+development/test fallback.
+
+```bash
+cd orchestrator
+
+# Apply all pending migrations to DB_URL.
+alembic upgrade head
+
+# Generate and review a migration after changing SQLModel models.
+alembic revision --autogenerate -m "describe schema change"
+
+# Roll back the most recently applied migration.
+alembic downgrade -1
+```
+
+Commit every generated migration under `orchestrator/migrations/versions/`; do
+not modify an applied migration on a shared environment.
+
 ## Enabling real Cellpose
 
 The CV service ships in `stub` mode (deterministic rising confluence) so the

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     db_url: str = "sqlite:///cellflow.db"
+    db_migrations_enabled: bool = True
     cv_service_url: str = "http://cv-service:8001"
 
     clock_factor: float = 4.0
