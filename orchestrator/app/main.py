@@ -11,17 +11,23 @@ Endpoints:
 """
 import asyncio
 from contextlib import asynccontextmanager
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import select
 
 from . import engine, protocol
 from .config import settings
 from .db import get_session, init_db
+from .logging_config import configure_logging, get_logger, request_id_var
 from .models import COMPLETED, FAILED, Event, Run, StepExecution
 from .seed import seed_runs
+
+logger = get_logger(__name__)
 
 TICK_INTERVAL = settings.tick_interval
 SEED_ON_START = settings.seed_on_start
@@ -39,18 +45,35 @@ class SeedRequest(BaseModel):
     n: int = Field(default=10, ge=1, le=100)
 
 
+class ErrorResponse(BaseModel):
+    error: str
+    detail: str
+    request_id: str | None = None
+
+
 async def worker_loop():
     while True:
         try:
             with get_session() as s:
                 engine.tick(s)
-        except Exception as e:  # keep the worker alive
-            print(f"[worker] tick error: {e}")
+        except (ConnectionError, TimeoutError) as e:
+            logger.warning(
+                "transient_error",
+                extra={"error": str(e), "event_type": "worker_error"},
+            )
+        except ValueError as e:
+            logger.error(
+                "data_integrity_error",
+                extra={"error": str(e), "event_type": "worker_error"},
+                exc_info=True,
+            )
+            raise
         await asyncio.sleep(TICK_INTERVAL)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     init_db()
     if SEED_ON_START:
         with get_session() as s:
@@ -65,6 +88,38 @@ app = FastAPI(title="CellFlow Orchestrator", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def request_context_middleware(request: Request, call_next):
+    """Attach a request id and convert unhandled exceptions to ErrorResponse."""
+    request_id = str(uuid4())
+    request_id_var.set(request_id)
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    except HTTPException as exc:
+        response = await http_exception_handler(request, exc)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    except Exception:
+        logger.exception(
+            "unhandled_exception",
+            extra={
+                "path": request.url.path,
+                "event_type": "api_error",
+                "request_id": request_id,
+            },
+        )
+        return JSONResponse(
+            status_code=500,
+            content=ErrorResponse(
+                error="internal_error",
+                detail="An unexpected error occurred",
+                request_id=request_id,
+            ).model_dump(),
+        )
 
 
 @app.post("/runs")

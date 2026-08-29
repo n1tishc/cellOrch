@@ -14,6 +14,10 @@ To go real:
 import glob
 import os
 
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
+
 CV_MODE = os.environ.get("CV_MODE", "auto")  # auto | real | stub
 SAMPLES_DIR = os.environ.get("SAMPLES_DIR", "samples")
 
@@ -36,7 +40,7 @@ def _real_available() -> bool:
         return False
     try:
         import cellpose  # noqa: F401
-    except Exception:
+    except ImportError:
         return False
     return True
 
@@ -73,6 +77,14 @@ def analyze(run_id: int, image_index: int) -> dict:
     if _real_available():
         try:
             return real_reading(image_index)
-        except Exception as e:
-            print(f"[cv] real analysis failed ({e}); using stub")
+        except (OSError, RuntimeError, ImportError) as e:
+            logger.warning(
+                "real_analysis_failed",
+                extra={
+                    "error": str(e),
+                    "event_type": "cv_error",
+                    "run_id": run_id,
+                    "image_index": image_index,
+                },
+            )
     return stub_reading(image_index)

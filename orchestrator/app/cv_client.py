@@ -8,8 +8,10 @@ rising-confluence curve the stub service uses.
 import httpx
 
 from .config import settings
+from .logging_config import get_logger
 
 CV_URL = settings.cv_service_url
+logger = get_logger(__name__)
 
 
 def stub_confluence(image_count: int) -> dict:
@@ -24,6 +26,10 @@ def analyze(run_id: int, image_count: int) -> dict:
         resp = httpx.post(f"{CV_URL}/analyze", json=payload, timeout=5.0)
         resp.raise_for_status()
         return resp.json()
-    except Exception:
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
         # Resilience: a CV outage shouldn't crash the pipeline.
+        logger.warning(
+            "cv_service_unreachable",
+            extra={"error": str(e), "event_type": "cv_error", "run_id": run_id},
+        )
         return stub_confluence(image_count)

@@ -1,10 +1,22 @@
 """CV inference service: POST /analyze -> confluence + cell count."""
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 
 from . import analyzer
+from .logging_config import configure_logging, get_logger
 
-app = FastAPI(title="CellFlow CV Service")
+logger = get_logger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    configure_logging()
+    yield
+
+
+app = FastAPI(title="CellFlow CV Service", lifespan=lifespan)
 
 
 class AnalyzeRequest(BaseModel):

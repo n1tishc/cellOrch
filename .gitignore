@@ -4,3 +4,4 @@ node_modules/
 dist/
 .venv/
 .DS_Store
+.pi/
