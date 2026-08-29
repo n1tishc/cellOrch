@@ -24,7 +24,10 @@ from . import engine, protocol
 from .config import settings
 from .db import get_session, init_db
 from .logging_config import configure_logging, get_logger, request_id_var
-from .models import COMPLETED, FAILED, Event, Run, StepExecution
+from .models import (
+    CANCELLED, COMPLETED, FAILED, PAUSED, PENDING, RUNNING, WAITING,
+    Event, Run, StepExecution, utcnow,
+)
 from .seed import seed_runs
 
 logger = get_logger(__name__)
@@ -157,6 +160,55 @@ def get_run(run_id: int):
             select(Event).where(Event.run_id == run_id).order_by(Event.id.desc())
         ).all()
         return {"run": run, "steps": steps, "events": events}
+
+
+@app.post("/runs/{run_id}/pause")
+def pause_run(run_id: int):
+    with get_session() as s:
+        run = s.get(Run, run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+        if run.status not in (PENDING, WAITING, RUNNING):
+            raise HTTPException(400, "only active runs can be paused")
+        now = utcnow()
+        engine.release_held_resource(s, run_id, "paused by operator", now)
+        run.status = PAUSED
+        run.updated_at = now
+        engine.log(s, run_id, "paused", "Paused by operator")
+        s.commit()
+        return run
+
+
+@app.post("/runs/{run_id}/resume")
+def resume_run(run_id: int):
+    with get_session() as s:
+        run = s.get(Run, run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+        if run.status != PAUSED:
+            raise HTTPException(400, "only paused runs can be resumed")
+        run.status = PENDING
+        run.updated_at = utcnow()
+        engine.log(s, run_id, "resumed", "Resumed by operator")
+        s.commit()
+        return run
+
+
+@app.post("/runs/{run_id}/cancel")
+def cancel_run(run_id: int):
+    with get_session() as s:
+        run = s.get(Run, run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+        if run.status in (COMPLETED, FAILED, CANCELLED):
+            raise HTTPException(400, "terminal runs cannot be cancelled")
+        now = utcnow()
+        engine.release_held_resource(s, run_id, "cancelled by operator", now)
+        run.status = CANCELLED
+        run.updated_at = now
+        engine.log(s, run_id, "cancelled", "Cancelled by operator")
+        s.commit()
+        return run
 
 
 @app.post("/runs/{run_id}/inject-fault")

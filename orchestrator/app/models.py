@@ -22,6 +22,8 @@ class RunStatus(str, Enum):
     PENDING = "PENDING"      # between stages, ready to start the next one
     WAITING = "WAITING"      # next stage needs a busy resource; queued
     RUNNING = "RUNNING"      # a step is in progress
+    PAUSED = "PAUSED"
+    CANCELLED = "CANCELLED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
@@ -30,6 +32,7 @@ class StepStatus(str, Enum):
     RUNNING = "RUNNING"
     SUCCESS = "success"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class StageKind(str, Enum):
@@ -45,6 +48,8 @@ class StageKind(str, Enum):
 PENDING = RunStatus.PENDING
 WAITING = RunStatus.WAITING
 RUNNING = RunStatus.RUNNING
+PAUSED = RunStatus.PAUSED
+CANCELLED = RunStatus.CANCELLED
 COMPLETED = RunStatus.COMPLETED
 FAILED = RunStatus.FAILED
 ACTIVE_STATUSES = (PENDING, WAITING, RUNNING)

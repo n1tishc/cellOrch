@@ -60,6 +60,15 @@ def _current_running_step(session: Session, run_id: int) -> StepExecution | None
     ).first()
 
 
+def release_held_resource(session: Session, run_id: int, reason: str, now: datetime) -> None:
+    """End an in-progress step so its resource is available to other runs."""
+    step = _current_running_step(session, run_id)
+    if step is not None:
+        step.status = StepStatus.CANCELLED
+        step.error = reason
+        step.finish_at = now
+
+
 def _start_step(session: Session, run: Run, stage: protocol.Stage, now: datetime, attempt: int = 1):
     step = StepExecution(
         run_id=run.id, stage_name=stage.name, stage_kind=stage.kind,

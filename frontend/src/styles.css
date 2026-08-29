@@ -18,6 +18,10 @@ header button { background: #185fa5; color: #fff; border: 0; border-radius: 8px;
 .bar-fill { background: #1d9e75; height: 100%; transition: width .4s; }
 .bar-label { position: absolute; right: 8px; top: 2px; font-size: 11px; color: #2c2c2a; }
 .fault { margin-top: 10px; width: 100%; background: #faece7; color: #993c1d; border: 0; border-radius: 6px; padding: 5px; cursor: pointer; font-size: 12px; }
+.run-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 10px; }
+.run-actions button { border: 0; border-radius: 6px; padding: 5px; cursor: pointer; background: #e9eef5; color: #185fa5; font-size: 12px; }
+.run-actions .cancel { background: #faece7; color: #993c1d; }
+.run-actions button:disabled { cursor: not-allowed; opacity: .45; }
 .detail { background: #fff; border: 1px solid #e4e2da; border-radius: 12px; padding: 16px; margin-top: 20px; }
 .detail h2 { font-size: 16px; margin: 0 0 10px; }
 .detail ul { list-style: none; padding: 0; margin: 0; max-height: 260px; overflow: auto; font-size: 13px; }

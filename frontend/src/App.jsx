@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { listRuns, getMetrics, getRun, injectFault, startRun } from "./api.js";
+import { cancelRun, getMetrics, getRun, injectFault, listRuns, pauseRun, resumeRun, startRun } from "./api.js";
 
 const STAGE_COLORS = {
   Seed: "#888780", Incubate: "#1D9E75", Image: "#1D9E75",
@@ -7,7 +7,7 @@ const STAGE_COLORS = {
 };
 const STATUS_COLORS = {
   RUNNING: "#185FA5", WAITING: "#854F0B", PENDING: "#5F5E5A",
-  COMPLETED: "#3B6D11", FAILED: "#A32D2D",
+  PAUSED: "#854F0B", CANCELLED: "#5F5E5A", COMPLETED: "#3B6D11", FAILED: "#A32D2D",
 };
 
 function Bar({ value }) {
@@ -69,12 +69,12 @@ export default function App() {
               {r.stage_name} · passage {r.passage_count}
             </div>
             <Bar value={r.confluence} />
-            <button
-              className="fault"
-              onClick={(e) => { e.stopPropagation(); injectFault(r.id); }}
-            >
-              Inject fault
-            </button>
+            <div className="run-actions" onClick={(e) => e.stopPropagation()}>
+              <button disabled={!['PENDING', 'WAITING', 'RUNNING'].includes(r.status)} onClick={async () => { await pauseRun(r.id); refresh(); }}>Pause</button>
+              <button disabled={r.status !== 'PAUSED'} onClick={async () => { await resumeRun(r.id); refresh(); }}>Resume</button>
+              <button className="cancel" disabled={['COMPLETED', 'FAILED', 'CANCELLED'].includes(r.status)} onClick={async () => { await cancelRun(r.id); refresh(); }}>Cancel</button>
+            </div>
+            <button className="fault" onClick={(e) => { e.stopPropagation(); injectFault(r.id); }}>Inject fault</button>
           </div>
         ))}
       </div>
