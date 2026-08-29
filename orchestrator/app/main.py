@@ -12,9 +12,10 @@ Endpoints:
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from typing import Literal
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -28,7 +29,7 @@ from .logging_config import configure_logging, get_logger, request_id_var
 from .run_events import subscribe, unsubscribe
 from .models import (
     CANCELLED, COMPLETED, FAILED, PAUSED, PENDING, RUNNING, WAITING,
-    Event, Run, StepExecution, utcnow,
+    Event, Run, RunStatus, StepExecution, utcnow,
 )
 from .seed import seed_runs
 
@@ -139,14 +140,29 @@ def create_run(req: CreateRunRequest = Depends()):
 
 
 @app.get("/runs")
-def list_runs():
+def list_runs(
+    status: RunStatus | None = None,
+    stage: str | None = None,
+    search: str | None = Query(default=None, max_length=100),
+    sort: Literal["created_at", "updated_at", "name"] = "created_at",
+    direction: Literal["asc", "desc"] = "desc",
+):
     with get_session() as s:
-        runs = s.exec(select(Run).order_by(Run.id)).all()
-        stage_names = [st.name for st in protocol.DEFAULT_PROTOCOL]
-        return [
-            {**r.model_dump(), "stage_name": stage_names[r.current_stage]}
-            for r in runs
-        ]
+        statement = select(Run)
+        if status is not None:
+            statement = statement.where(Run.status == status)
+        if stage is not None:
+            stage_indexes = {item.name.lower(): index for index, item in enumerate(protocol.DEFAULT_PROTOCOL)}
+            if stage.lower() not in stage_indexes:
+                raise HTTPException(422, "invalid stage")
+            statement = statement.where(Run.current_stage == stage_indexes[stage.lower()])
+        if search:
+            statement = statement.where(Run.name.ilike(f"%{search}%"))
+        column = getattr(Run, sort)
+        statement = statement.order_by(column.asc() if direction == "asc" else column.desc())
+        runs = s.exec(statement).all()
+        stage_names = [item.name for item in protocol.DEFAULT_PROTOCOL]
+        return [{**run.model_dump(), "stage_name": stage_names[run.current_stage]} for run in runs]
 
 
 @app.get("/runs/stream")

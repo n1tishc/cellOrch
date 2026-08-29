@@ -43,9 +43,16 @@ export default function App() {
   const [eventSearch, setEventSearch] = useState("");
   const [hiddenEventTypes, setHiddenEventTypes] = useState(new Set());
   const [eventLimit, setEventLimit] = useState(50);
+  const initialFilters = Object.fromEntries(new URLSearchParams(window.location.search));
+  const [filters, setFilters] = useState({ status: initialFilters.status || "", stage: initialFilters.stage || "", search: initialFilters.search || "", sort: initialFilters.sort || "created_at", direction: initialFilters.direction || "desc" });
+
+  useEffect(() => {
+    const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value && value !== "created_at" && value !== "desc"));
+    window.history.replaceState(null, "", `${window.location.pathname}${query.size ? `?${query}` : ""}`);
+  }, [filters]);
 
   async function refresh() {
-    const [runResult, metricResult, resourceResult] = await Promise.allSettled([listRuns(), getMetrics(), getResources()]);
+    const [runResult, metricResult, resourceResult] = await Promise.allSettled([listRuns(filters), getMetrics(), getResources()]);
     if (runResult.status === "fulfilled") {
       setRuns(runResult.value);
       setLastUpdated(new Date());
@@ -90,7 +97,7 @@ export default function App() {
     connect();
     document.addEventListener("visibilitychange", onVisibility);
     return () => { source?.close(); clearTimeout(retryTimer); document.removeEventListener("visibilitychange", onVisibility); };
-  }, [selected]);
+  }, [selected, filters]);
 
   const events = detail?.events ?? [];
   const eventTypes = [...new Set(events.map((event) => event.type))].sort();
@@ -121,6 +128,13 @@ export default function App() {
         <div className="resource queue"><span>Queue depth</span><b>{resources.queue_depth}</b></div>
       </section>
       {error && <div className="connection-error" role="alert">{error}</div>}
+      <div className="filter-bar">
+        <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}><option value="">All statuses</option>{["RUNNING", "WAITING", "PENDING", "COMPLETED", "FAILED"].map((value) => <option key={value}>{value}</option>)}</select>
+        <select value={filters.stage} onChange={(event) => setFilters({ ...filters, stage: event.target.value })}><option value="">All stages</option>{["Seed", "Incubate", "Image", "Count", "Decision", "Passage"].map((value) => <option key={value}>{value}</option>)}</select>
+        <input placeholder="Search runs" value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} />
+        <select value={`${filters.sort}:${filters.direction}`} onChange={(event) => { const [sort, direction] = event.target.value.split(":"); setFilters({ ...filters, sort, direction }); }}><option value="created_at:desc">Newest</option><option value="created_at:asc">Oldest</option><option value="name:asc">Name A-Z</option><option value="name:desc">Name Z-A</option></select>
+      </div>
+      <p className="result-count">Showing {runs.length} runs</p>
       <div className="grid">
         {loading && Array.from({ length: 6 }, (_, index) => <div className="card skeleton" key={index} />)}
         {!loading && runs.length === 0 && <div className="empty-state">No runs yet. Start a run to begin the protocol.</div>}

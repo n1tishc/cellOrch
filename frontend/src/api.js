@@ -1,7 +1,8 @@
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-export async function listRuns() {
-  const r = await fetch(`${BASE}/runs`);
+export async function listRuns(params = {}) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value));
+  const r = await fetch(`${BASE}/runs?${query}`);
   return r.json();
 }
 export async function getMetrics() {

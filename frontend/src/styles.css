@@ -8,6 +8,7 @@ header h1 { margin: 0; font-size: 24px; font-weight: 600; }
 .metrics { display: flex; gap: 14px; margin-left: auto; font-size: 13px; color: #44443f; }
 .metrics .fail { color: #a32d2d; }
 header button { background: #185fa5; color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; font-size: 14px; }
+.filter-bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }.filter-bar input,.filter-bar select { padding:7px; border:1px solid #d5d3cb; border-radius:6px; background:#fff; }.result-count { margin:0 0 10px; color:#6b6a64; font-size:13px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
 .resource-panel { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 16px; }
 .resource { min-width: 170px; flex: 1; display: grid; grid-template-columns: 1fr auto; gap: 5px 10px; padding: 10px; background: #fff; border: 1px solid #e4e2da; border-radius: 8px; font-size: 13px; }
