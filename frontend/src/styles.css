@@ -17,6 +17,7 @@ header button { background: #185fa5; color: #fff; border: 0; border-radius: 8px;
 .card-top { display: flex; justify-content: space-between; align-items: center; }
 .status { color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 20px; }
 .stage { font-size: 13px; margin: 8px 0; font-weight: 500; }
+.pipeline { display: flex; align-items: center; margin: 8px 0; overflow: hidden; }.pipeline i { height: 2px; flex: 1; background: #d5d3cb; }.pipeline i.done { background: #3b6d11; }.pipeline-node { min-width: 18px; height: 18px; padding: 2px; border-radius: 50%; border: 2px solid #b8b6ae; color: #77756e; background: #fff; font-size: 8px; line-height: 10px; text-align: center; white-space: nowrap; }.pipeline-node.done { background: #3b6d11; border-color: #3b6d11; color: #fff; }.pipeline-node.current { border-color: #185fa5; color: #185fa5; box-shadow: 0 0 0 3px #d9e7f6; animation: pulse 1.5s infinite; }@keyframes pulse { 50% { box-shadow: 0 0 0 5px transparent; } }
 .bar { position: relative; background: #eceae2; border-radius: 6px; height: 20px; overflow: hidden; }
 .bar-fill { background: #1d9e75; height: 100%; transition: width .4s; }
 .bar-label { position: absolute; right: 8px; top: 2px; font-size: 11px; color: #2c2c2a; }

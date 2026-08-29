@@ -19,6 +19,17 @@ function Bar({ value }) {
   );
 }
 
+const PIPELINE = ["Seed", "Incubate", "Image", "Count", "Decision", "Passage"];
+function Pipeline({ run }) {
+  const current = PIPELINE.indexOf(run.stage_name);
+  const completed = run.status === "COMPLETED";
+  return <div className="pipeline" aria-label={`Protocol stage: ${run.stage_name}`}>
+    {PIPELINE.map((stage, index) => <React.Fragment key={stage}>
+      {index > 0 && <i className={index <= current || completed ? "done" : ""} />}
+      <span className={`pipeline-node ${completed || index < current ? "done" : ""} ${!completed && index === current ? "current" : ""}`} title={stage}>{stage[0]}{stage === "Passage" && run.passage_count > 0 ? `×${run.passage_count}` : ""}</span>
+    </React.Fragment>)}
+  </div>;
+
 export default function App() {
   const [runs, setRuns] = useState([]);
   const [metrics, setMetrics] = useState({});
@@ -119,6 +130,7 @@ export default function App() {
             <div className="stage" style={{ color: STAGE_COLORS[r.stage_name] }}>
               {r.stage_name} · passage {r.passage_count}
             </div>
+            <Pipeline run={r} />
             <Bar value={r.confluence} />
             <div className="run-actions" onClick={(e) => e.stopPropagation()}>
               <button disabled={!['PENDING', 'WAITING', 'RUNNING'].includes(r.status)} onClick={async () => { await pauseRun(r.id); refresh(); }}>Pause</button>
