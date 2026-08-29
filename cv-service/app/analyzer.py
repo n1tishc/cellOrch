@@ -13,6 +13,7 @@ To go real:
 """
 import glob
 import os
+import threading
 
 from .logging_config import get_logger
 
@@ -23,21 +24,25 @@ SAMPLES_DIR = os.environ.get("SAMPLES_DIR", "samples")
 
 _model = None
 _samples: list[str] = sorted(glob.glob(os.path.join(SAMPLES_DIR, "*")))
+_model_lock = threading.RLock()
+_samples_lock = threading.RLock()
 
 
 def _load_model():
     global _model
-    if _model is None:
-        from cellpose import models  # imported lazily so stub mode needs no torch
-        _model = models.Cellpose(model_type="cyto3")
-    return _model
+    with _model_lock:
+        if _model is None:
+            from cellpose import models  # imported lazily so stub mode needs no torch
+            _model = models.Cellpose(model_type="cyto3")
+        return _model
 
 
 def _real_available() -> bool:
     if CV_MODE == "stub":
         return False
-    if not _samples:
-        return False
+    with _samples_lock:
+        if not _samples:
+            return False
     try:
         import cellpose  # noqa: F401
     except ImportError:
@@ -59,10 +64,11 @@ def real_reading(image_index: int) -> dict:
     import numpy as np
     from PIL import Image
 
-    path = _samples[min(image_index, len(_samples) - 1)]
-    img = np.array(Image.open(path).convert("L"))
-    model = _load_model()
-    masks, _, _, _ = model.eval(img, diameter=None, channels=[0, 0])
+    with _samples_lock, _model_lock:
+        path = _samples[min(image_index, len(_samples) - 1)]
+        img = np.array(Image.open(path).convert("L"))
+        model = _load_model()
+        masks, _, _, _ = model.eval(img, diameter=None, channels=[0, 0])
     total = masks.size
     covered = int((masks > 0).sum())
     return {

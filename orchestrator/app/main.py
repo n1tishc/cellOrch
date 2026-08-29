@@ -13,10 +13,12 @@ import asyncio
 import csv
 import io
 import json
+from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Literal
 from uuid import uuid4
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,6 +42,7 @@ logger = get_logger(__name__)
 
 TICK_INTERVAL = settings.tick_interval
 SEED_ON_START = settings.seed_on_start
+last_worker_tick: datetime | None = None
 
 
 class CreateRunRequest(BaseModel):
@@ -66,10 +69,12 @@ class ErrorResponse(BaseModel):
 
 
 async def worker_loop():
+    global last_worker_tick
     while True:
         try:
             with get_session() as s:
                 engine.tick(s)
+            last_worker_tick = utcnow()
         except (ConnectionError, TimeoutError) as e:
             logger.warning(
                 "transient_error",
@@ -87,6 +92,8 @@ async def worker_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global last_worker_tick
+    last_worker_tick = None
     configure_logging()
     init_db()
     if SEED_ON_START:
@@ -96,6 +103,10 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(worker_loop())
     yield
     task.cancel()
+    try:
+        await asyncio.wait_for(task, timeout=5)
+    except (asyncio.CancelledError, TimeoutError):
+        pass
 
 
 app = FastAPI(title="CellFlow Orchestrator", lifespan=lifespan)
@@ -356,9 +367,32 @@ def healthz():
 
 @app.get("/readyz")
 def readyz():
-    with get_session() as s:
-        s.exec(select(Run).limit(1)).all()
-    return {"status": "ready"}
+    checks: dict[str, str] = {}
+    try:
+        with get_session() as s:
+            s.exec(select(Run).limit(1)).all()
+        checks["database"] = "ok"
+    except Exception:
+        checks["database"] = "error"
+    try:
+        response = httpx.get(f"{settings.cv_service_url}/healthz", timeout=2.0)
+        checks["cv_service"] = "ok" if response.is_success else "degraded"
+    except httpx.HTTPError:
+        checks["cv_service"] = "unreachable"
+    if last_worker_tick is None or (utcnow() - last_worker_tick).total_seconds() > settings.worker_stall_seconds:
+        checks["worker"] = "stalled"
+    else:
+        checks["worker"] = "ok"
+    status = "ready" if all(value == "ok" for value in checks.values()) else "unhealthy" if checks["database"] == "error" else "degraded"
+    return {"status": status, "checks": checks}
+
+
+@app.get("/deep-healthz")
+def deep_healthz():
+    """Liveness check: worker and database must be healthy; CV is readiness-only."""
+    readiness = readyz()
+    status = "ok" if readiness["checks"]["database"] == "ok" and readiness["checks"]["worker"] == "ok" else "unhealthy"
+    return {"status": status, "checks": readiness["checks"]}
 
 
 @app.get("/resources")

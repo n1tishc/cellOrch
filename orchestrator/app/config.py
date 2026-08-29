@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     backoff_s: float = 2.0
 
     tick_interval: float = 1.0
+    worker_stall_seconds: float = 30.0
     seed_on_start: int = 10
 
     confluence_threshold: float = 0.80
