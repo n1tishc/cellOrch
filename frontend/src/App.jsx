@@ -24,11 +24,26 @@ export default function App() {
   const [metrics, setMetrics] = useState({});
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [connection, setConnection] = useState("connecting");
+  const [error, setError] = useState("");
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   async function refresh() {
-    setRuns(await listRuns());
-    setMetrics(await getMetrics());
-    if (selected != null) setDetail(await getRun(selected));
+    const [runResult, metricResult] = await Promise.allSettled([listRuns(), getMetrics()]);
+    if (runResult.status === "fulfilled") {
+      setRuns(runResult.value);
+      setLastUpdated(new Date());
+      setError(metricResult.status === "rejected" ? "Metrics unavailable — showing run data." : "");
+    } else {
+      setError("API unreachable. Retrying…");
+      setConnection("disconnected");
+    }
+    if (metricResult.status === "fulfilled") setMetrics(metricResult.value);
+    if (selected != null) {
+      try { setDetail(await getRun(selected)); } catch { setError("Run detail unavailable."); }
+    }
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -39,7 +54,7 @@ export default function App() {
     const connect = () => {
       if (document.hidden) return;
       source = new EventSource(streamUrl);
-      source.onopen = () => { attempts = 0; };
+      source.onopen = () => { attempts = 0; setConnection("connected"); setError(""); }; 
       source.onmessage = async ({ data }) => {
         const event = JSON.parse(data);
         const update = await getRun(event.run_id);
@@ -48,6 +63,8 @@ export default function App() {
       };
       source.onerror = () => {
         source.close();
+        setConnection("reconnecting");
+        setError("Connection lost. Reconnecting…");
         retryTimer = setTimeout(connect, Math.min(30000, 1000 * 2 ** attempts++));
       };
     };
@@ -63,6 +80,8 @@ export default function App() {
       <header>
         <h1>CellFlow</h1>
         <span className="sub">lab-workflow orchestrator</span>
+        <span className={`connection ${connection}`}><i />{connection}</span>
+        {lastUpdated && <span className="updated">updated {lastUpdated.toLocaleTimeString()}</span>}
         <div className="metrics">
           <span>{metrics.runs_active ?? 0} active</span>
           <span>{metrics.runs_completed ?? 0} done</span>
@@ -71,10 +90,14 @@ export default function App() {
           <span>{metrics.audit_events_total ?? 0} events</span>
         </div>
         <button onClick={async () => { await startRun(); refresh(); }}>+ Start run</button>
+        <button onClick={refresh}>Retry</button>
       </header>
 
+      {error && <div className="connection-error" role="alert">{error}</div>}
       <div className="grid">
-        {runs.map((r) => (
+        {loading && Array.from({ length: 6 }, (_, index) => <div className="card skeleton" key={index} />)}
+        {!loading && runs.length === 0 && <div className="empty-state">No runs yet. Start a run to begin the protocol.</div>}
+        {!loading && runs.map((r) => (
           <div
             key={r.id}
             className={`card ${selected === r.id ? "active" : ""}`}

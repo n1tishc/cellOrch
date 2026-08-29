@@ -27,3 +27,10 @@ header button { background: #185fa5; color: #fff; border: 0; border-radius: 8px;
 .detail ul { list-style: none; padding: 0; margin: 0; max-height: 260px; overflow: auto; font-size: 13px; }
 .detail li { padding: 4px 0; border-bottom: 1px solid #f0eee8; }
 .ev-type { display: inline-block; min-width: 90px; color: #534ab7; font-weight: 500; }
+.connection, .updated { font-size: 12px; color: #6b6a64; }
+.connection i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; background: #b27b00; }
+.connection.connected i { background: #3b6d11; } .connection.disconnected i { background: #a32d2d; }
+.connection-error { margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; background: #faece7; color: #993c1d; }
+.skeleton { min-height: 150px; border: 0; background: linear-gradient(90deg, #eceae2 25%, #f7f6f2 50%, #eceae2 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
+.empty-state { grid-column: 1 / -1; padding: 32px; text-align: center; color: #6b6a64; background: #fff; border-radius: 12px; }
+@keyframes shimmer { to { background-position: -200% 0; } }
