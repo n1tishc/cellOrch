@@ -13,22 +13,23 @@ Responsibilities:
   - write an Event row for every meaningful transition (the audit log)
 """
 import json
-import os
 import random
 from datetime import datetime, timedelta
+from typing import Sequence
 
 from sqlmodel import Session, select
 
 from . import cv_client, protocol
+from .config import settings
 from .models import (
     ACTIVE_STATUSES, COMPLETED, FAILED, PENDING, RUNNING, WAITING,
-    Event, Run, StepExecution, utcnow,
+    Event, Run, StepExecution, StepStatus, utcnow,
 )
 
-CLOCK_FACTOR = float(os.environ.get("CLOCK_FACTOR", "4"))  # sim seconds run this much faster
-FAILURE_RATE = float(os.environ.get("FAILURE_RATE", "0.05"))  # random step failure chance
-MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "2"))
-BACKOFF_S = float(os.environ.get("BACKOFF_S", "2"))  # sim seconds before a retry
+CLOCK_FACTOR = settings.clock_factor  # sim seconds run this much faster
+FAILURE_RATE = settings.failure_rate  # random step failure chance
+MAX_RETRIES = settings.max_retries
+BACKOFF_S = settings.backoff_s  # sim seconds before a retry
 
 
 def log(session: Session, run_id: int, type_: str, message: str) -> None:
@@ -42,7 +43,7 @@ def _real_duration(sim_seconds: float) -> timedelta:
 def _resource_usage(session: Session) -> dict[str, int]:
     """Count resources currently held by in-progress steps."""
     usage = {r: 0 for r in protocol.RESOURCE_CAPACITY}
-    running = session.exec(select(StepExecution).where(StepExecution.status == RUNNING)).all()
+    running = session.exec(select(StepExecution).where(StepExecution.status == StepStatus.RUNNING)).all()
     for step in running:
         stage = protocol.DEFAULT_PROTOCOL[protocol.STAGE_INDEX[step.stage_kind]] \
             if step.stage_kind in protocol.STAGE_INDEX else None
@@ -54,7 +55,7 @@ def _resource_usage(session: Session) -> dict[str, int]:
 def _current_running_step(session: Session, run_id: int) -> StepExecution | None:
     return session.exec(
         select(StepExecution)
-        .where(StepExecution.run_id == run_id, StepExecution.status == RUNNING)
+        .where(StepExecution.run_id == run_id, StepExecution.status == StepStatus.RUNNING)
         .order_by(StepExecution.id.desc())
     ).first()
 
@@ -62,7 +63,7 @@ def _current_running_step(session: Session, run_id: int) -> StepExecution | None
 def _start_step(session: Session, run: Run, stage: protocol.Stage, now: datetime, attempt: int = 1):
     step = StepExecution(
         run_id=run.id, stage_name=stage.name, stage_kind=stage.kind,
-        status=RUNNING, attempt=attempt, started_at=now,
+        status=StepStatus.RUNNING, attempt=attempt, started_at=now,
         finish_at=now + _real_duration(stage.duration_s),
     )
     session.add(step)
@@ -104,7 +105,7 @@ def _advance_after_success(session: Session, run: Run, stage: protocol.Stage, no
     run.status = PENDING
 
 
-def _finish_running_steps(session: Session, runs: list[Run], now: datetime) -> None:
+def _finish_running_steps(session: Session, runs: Sequence[Run], now: datetime) -> None:
     for run in runs:
         if run.status != RUNNING:
             continue
@@ -117,13 +118,13 @@ def _finish_running_steps(session: Session, runs: list[Run], now: datetime) -> N
         fail = run.force_fail_next or (random.random() < FAILURE_RATE)
         run.force_fail_next = False
         if fail:
-            step.status = "failed"
+            step.status = StepStatus.FAILED
             step.error = "injected/transient failure"
             if step.attempt <= MAX_RETRIES:
                 log(session, run.id, "retry", f"{stage.name} failed; retry {step.attempt}/{MAX_RETRIES}")
                 retry = StepExecution(
                     run_id=run.id, stage_name=stage.name, stage_kind=stage.kind,
-                    status=RUNNING, attempt=step.attempt + 1, started_at=now,
+                    status=StepStatus.RUNNING, attempt=step.attempt + 1, started_at=now,
                     finish_at=now + _real_duration(stage.duration_s) + _real_duration(BACKOFF_S),
                 )
                 session.add(retry)
@@ -133,7 +134,7 @@ def _finish_running_steps(session: Session, runs: list[Run], now: datetime) -> N
             continue
 
         # Success.
-        step.status = "success"
+        step.status = StepStatus.SUCCESS
         if stage.kind == protocol.IMAGE:
             run.image_count += 1
             reading = cv_client.analyze(run.id, run.image_count)
@@ -146,7 +147,7 @@ def _finish_running_steps(session: Session, runs: list[Run], now: datetime) -> N
         _advance_after_success(session, run, stage, now)
 
 
-def _start_pending_steps(session: Session, runs: list[Run], now: datetime) -> None:
+def _start_pending_steps(session: Session, runs: Sequence[Run], now: datetime) -> None:
     usage = _resource_usage(session)
     for run in runs:
         if run.status not in (PENDING, WAITING):
@@ -163,11 +164,16 @@ def _start_pending_steps(session: Session, runs: list[Run], now: datetime) -> No
         _start_step(session, run, stage, now)
 
 
+def _active_runs(session: Session) -> Sequence[Run]:
+    active = tuple(s.value for s in ACTIVE_STATUSES)
+    return session.exec(select(Run).where(Run.status.in_(active))).all()  # type: ignore[attr-defined]
+
+
 def tick(session: Session, now: datetime | None = None) -> None:
     now = now or utcnow()
-    runs = session.exec(select(Run).where(Run.status.in_(ACTIVE_STATUSES))).all()
+    runs = _active_runs(session)
     _finish_running_steps(session, runs, now)   # frees resources first
     session.commit()
-    runs = session.exec(select(Run).where(Run.status.in_(ACTIVE_STATUSES))).all()
+    runs = _active_runs(session)
     _start_pending_steps(session, runs, now)
     session.commit()

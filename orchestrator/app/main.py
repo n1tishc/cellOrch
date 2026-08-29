@@ -10,20 +10,33 @@ Endpoints:
   GET  /metrics              simple counters
 """
 import asyncio
-import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from sqlmodel import select
 
 from . import engine, protocol
+from .config import settings
 from .db import get_session, init_db
 from .models import COMPLETED, FAILED, Event, Run, StepExecution
 from .seed import seed_runs
 
-TICK_INTERVAL = float(os.environ.get("TICK_INTERVAL", "1.0"))
-SEED_ON_START = int(os.environ.get("SEED_ON_START", "10"))
+TICK_INTERVAL = settings.tick_interval
+SEED_ON_START = settings.seed_on_start
+
+
+class CreateRunRequest(BaseModel):
+    name: str | None = Field(
+        default=None,
+        max_length=100,
+        pattern=r'^[a-zA-Z0-9\-_ ]+$',
+    )
+
+
+class SeedRequest(BaseModel):
+    n: int = Field(default=10, ge=1, le=100)
 
 
 async def worker_loop():
@@ -55,10 +68,10 @@ app.add_middleware(
 
 
 @app.post("/runs")
-def create_run(name: str | None = None):
+def create_run(req: CreateRunRequest = Depends()):
     with get_session() as s:
         n = s.exec(select(Run)).all()
-        run = Run(name=name or f"Line-{len(n)+1:02d}")
+        run = Run(name=req.name or f"Line-{len(n)+1:02d}")
         s.add(run)
         s.commit()
         s.refresh(run)
@@ -104,9 +117,9 @@ def inject_fault(run_id: int):
 
 
 @app.post("/seed")
-def seed(n: int = 10):
+def seed(req: SeedRequest = Depends()):
     with get_session() as s:
-        created = seed_runs(s, n)
+        created = seed_runs(s, req.n)
         return {"created": created}
 
 

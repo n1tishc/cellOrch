@@ -6,21 +6,22 @@ loop back to INCUBATE) or finish.
 """
 from dataclasses import dataclass
 
+from .models import StageKind
 
-# Stage "kinds" — the engine special-cases IMAGE (calls the CV service) and
-# DECISION (branches), and treats the rest as plain timed steps.
-SEED = "SEED"
-INCUBATE = "INCUBATE"
-IMAGE = "IMAGE"
-COUNT = "COUNT"
-DECISION = "DECISION"
-PASSAGE = "PASSAGE"
+
+# Backward-compatible aliases used throughout the engine.
+SEED = StageKind.SEED
+INCUBATE = StageKind.INCUBATE
+IMAGE = StageKind.IMAGE
+COUNT = StageKind.COUNT
+DECISION = StageKind.DECISION
+PASSAGE = StageKind.PASSAGE
 
 
 @dataclass(frozen=True)
 class Stage:
     name: str
-    kind: str
+    kind: StageKind
     duration_s: float        # simulated seconds; real wait = duration_s / CLOCK_FACTOR
     resource: str | None = None   # "imager" | "incubator" | None
 

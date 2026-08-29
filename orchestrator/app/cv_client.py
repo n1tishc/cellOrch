@@ -5,11 +5,11 @@ stage. If the service is unreachable (or during tests), it falls back to a
 deterministic local estimate so the orchestrator never blocks — the same
 rising-confluence curve the stub service uses.
 """
-import os
-
 import httpx
 
-CV_URL = os.environ.get("CV_SERVICE_URL", "http://cv-service:8001")
+from .config import settings
+
+CV_URL = settings.cv_service_url
 
 
 def stub_confluence(image_count: int) -> dict:

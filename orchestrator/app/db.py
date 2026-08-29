@@ -1,13 +1,14 @@
 """SQLite engine + session helpers."""
-import os
-
 from sqlmodel import Session, SQLModel, create_engine
 
-DB_URL = os.environ.get("DB_URL", "sqlite:///cellflow.db")
+from .config import settings
 
 # check_same_thread=False so the background worker task and request handlers
 # can share the engine.
-engine = create_engine(DB_URL, connect_args={"check_same_thread": False})
+engine = create_engine(
+    settings.db_url,
+    connect_args={"check_same_thread": False},
+)
 
 
 def init_db() -> None:
