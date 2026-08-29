@@ -37,13 +37,10 @@ BACKOFF_S = settings.backoff_s  # sim seconds before a retry
 def log(session: Session, run_id: int, type_: str, message: str) -> None:
     event = Event(run_id=run_id, type=type_, message=message)
     session.add(event)
-    payload = {"event_type": type_, "run_id": run_id, "message": message, "timestamp": event.created_at.isoformat()}
+    webhook_event_type = f"run.{type_}" if type_ in {"failed", "completed"} else type_
+    payload = {"event_type": webhook_event_type, "run_id": run_id, "message": message, "timestamp": event.created_at.isoformat()}
     publish({"run_id": run_id, "type": type_, "message": message, "created_at": event.created_at.isoformat()})
-    try:
-        fire_webhooks(session, type_, payload)
-    except Exception:
-        # Webhook delivery must never block the orchestration path.
-        pass
+    fire_webhooks(session, webhook_event_type, payload)
 
 
 def _real_duration(sim_seconds: float) -> timedelta:
@@ -66,7 +63,7 @@ def _current_running_step(session: Session, run_id: int) -> StepExecution | None
     return session.exec(
         select(StepExecution)
         .where(StepExecution.run_id == run_id, StepExecution.status == StepStatus.RUNNING)
-        .order_by(StepExecution.id.desc())
+        .order_by(StepExecution.id.desc())  # type: ignore[union-attr]
     ).first()
 
 
@@ -80,6 +77,7 @@ def release_held_resource(session: Session, run_id: int, reason: str, now: datet
 
 
 def _start_step(session: Session, run: Run, stage: protocol.Stage, now: datetime, attempt: int = 1):
+    assert run.id is not None
     step = StepExecution(
         run_id=run.id, stage_name=stage.name, stage_kind=stage.kind,
         status=StepStatus.RUNNING, attempt=attempt, started_at=now,
@@ -94,6 +92,7 @@ def _start_step(session: Session, run: Run, stage: protocol.Stage, now: datetime
 
 def _apply_decision(session: Session, run: Run, now: datetime) -> None:
     """Confluence drives the branch: passage (and loop) or keep growing or finish."""
+    assert run.id is not None
     if run.confluence >= protocol.CONFLUENCE_THRESHOLD:
         if run.passage_count >= protocol.MAX_PASSAGES:
             run.status = COMPLETED
@@ -109,6 +108,7 @@ def _apply_decision(session: Session, run: Run, now: datetime) -> None:
 
 
 def _advance_after_success(session: Session, run: Run, stage: protocol.Stage, now: datetime) -> None:
+    assert run.id is not None
     if stage.kind == protocol.DECISION:
         _apply_decision(session, run, now)
         return
@@ -128,6 +128,7 @@ def _finish_running_steps(session: Session, runs: Sequence[Run], now: datetime) 
     for run in runs:
         if run.status != RUNNING:
             continue
+        assert run.id is not None
         step = _current_running_step(session, run.id)
         if step is None or step.finish_at is None or now < step.finish_at:
             continue
@@ -171,6 +172,7 @@ def _start_pending_steps(session: Session, runs: Sequence[Run], now: datetime) -
     for run in runs:
         if run.status not in (PENDING, WAITING):
             continue
+        assert run.id is not None
         stage = protocol.DEFAULT_PROTOCOL[run.current_stage]
         if stage.resource:
             cap = protocol.RESOURCE_CAPACITY[stage.resource]

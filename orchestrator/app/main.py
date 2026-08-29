@@ -19,6 +19,7 @@ from typing import Literal
 from uuid import uuid4
 
 import httpx
+from sqlalchemy import String, cast, func
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +33,7 @@ from .config import settings
 from .db import get_session, init_db
 from .logging_config import configure_logging, get_logger, request_id_var
 from .run_events import subscribe, unsubscribe
+from .webhooks import dispatch_webhook
 from .models import (
     CANCELLED, COMPLETED, FAILED, PAUSED, PENDING, RUNNING, WAITING,
     Event, Run, RunStatus, StepExecution, Webhook, utcnow,
@@ -68,9 +70,9 @@ class ErrorResponse(BaseModel):
     request_id: str | None = None
 
 
-async def worker_loop():
+async def worker_loop(stop_event: asyncio.Event):
     global last_worker_tick
-    while True:
+    while not stop_event.is_set():
         try:
             with get_session() as s:
                 engine.tick(s)
@@ -87,7 +89,10 @@ async def worker_loop():
                 exc_info=True,
             )
             raise
-        await asyncio.sleep(TICK_INTERVAL)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=TICK_INTERVAL)
+        except TimeoutError:
+            pass
 
 
 @asynccontextmanager
@@ -100,13 +105,18 @@ async def lifespan(app: FastAPI):
         with get_session() as s:
             if not s.exec(select(Run)).first():
                 seed_runs(s, SEED_ON_START)
-    task = asyncio.create_task(worker_loop())
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(worker_loop(stop_event))
     yield
-    task.cancel()
+    stop_event.set()
     try:
         await asyncio.wait_for(task, timeout=5)
-    except (asyncio.CancelledError, TimeoutError):
-        pass
+    except TimeoutError:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="CellFlow Orchestrator", lifespan=lifespan)
@@ -160,6 +170,7 @@ def create_run(req: CreateRunRequest = Depends(), user: dict = Depends(get_curre
 
 @app.get("/runs")
 def list_runs(
+    response: Response,
     status: RunStatus | None = None,
     stage: str | None = None,
     search: str | None = Query(default=None, max_length=100),
@@ -167,6 +178,7 @@ def list_runs(
     direction: Literal["asc", "desc"] = "desc",
 ):
     with get_session() as s:
+        total_runs = s.exec(select(func.count()).select_from(Run)).one()
         statement = select(Run)
         if status is not None:
             statement = statement.where(Run.status == status)
@@ -176,10 +188,11 @@ def list_runs(
                 raise HTTPException(422, "invalid stage")
             statement = statement.where(Run.current_stage == stage_indexes[stage.lower()])
         if search:
-            statement = statement.where(Run.name.ilike(f"%{search}%"))
+            statement = statement.where(cast(Run.name, String).ilike(f"%{search}%"))
         column = getattr(Run, sort)
         statement = statement.order_by(column.asc() if direction == "asc" else column.desc())
         runs = s.exec(statement).all()
+        response.headers["X-Total-Count"] = str(total_runs)
         stage_names = [item.name for item in protocol.DEFAULT_PROTOCOL]
         return [{**run.model_dump(), "stage_name": stage_names[run.current_stage]} for run in runs]
 
@@ -195,7 +208,7 @@ def _download(content: str, filename: str, media_type: str) -> Response:
 @app.get("/runs/export")
 def export_runs(format: Literal["csv", "json"] = "csv"):
     with get_session() as s:
-        runs = s.exec(select(Run).order_by(Run.id)).all()
+        runs = s.exec(select(Run).order_by(Run.id)).all()  # type: ignore[arg-type]
         summaries = [
             {"id": run.id, "name": run.name, "status": run.status.value, "current_stage": run.current_stage,
              "passage_count": run.passage_count, "confluence": run.confluence,
@@ -216,8 +229,8 @@ def export_run(run_id: int, format: Literal["csv", "json"] = "csv"):
         run = s.get(Run, run_id)
         if not run:
             raise HTTPException(404, "run not found")
-        steps = s.exec(select(StepExecution).where(StepExecution.run_id == run_id).order_by(StepExecution.id)).all()
-        events = s.exec(select(Event).where(Event.run_id == run_id).order_by(Event.id)).all()
+        steps = s.exec(select(StepExecution).where(StepExecution.run_id == run_id).order_by(StepExecution.id)).all()  # type: ignore[arg-type]
+        events = s.exec(select(Event).where(Event.run_id == run_id).order_by(Event.id)).all()  # type: ignore[arg-type]
         payload = {
             "run": run.model_dump(mode="json"),
             "steps": [step.model_dump(mode="json") for step in steps],
@@ -257,10 +270,10 @@ def get_run(run_id: int):
         if not run:
             raise HTTPException(404, "run not found")
         steps = s.exec(
-            select(StepExecution).where(StepExecution.run_id == run_id).order_by(StepExecution.id)
+            select(StepExecution).where(StepExecution.run_id == run_id).order_by(StepExecution.id)  # type: ignore[arg-type]
         ).all()
         events = s.exec(
-            select(Event).where(Event.run_id == run_id).order_by(Event.id.desc())
+            select(Event).where(Event.run_id == run_id).order_by(Event.id.desc())  # type: ignore[union-attr]
         ).all()
         return {
             "run": {**run.model_dump(), "stage_name": protocol.DEFAULT_PROTOCOL[run.current_stage].name},
@@ -342,6 +355,16 @@ def create_webhook(request: WebhookRequest, user: dict = Depends(get_current_use
 def list_webhooks():
     with get_session() as s:
         return s.exec(select(Webhook)).all()
+
+
+@app.post("/webhooks/{webhook_id}/test")
+def test_webhook(webhook_id: int, user: dict = Depends(get_current_user)):
+    with get_session() as s:
+        hook = s.get(Webhook, webhook_id)
+        if not hook:
+            raise HTTPException(404, "webhook not found")
+        dispatch_webhook(hook.url, {"event_type": "webhook.test", "run_id": None, "message": "Webhook test event", "timestamp": utcnow().isoformat()})
+        return {"ok": True, "webhook_id": webhook_id}
 
 
 @app.delete("/webhooks/{webhook_id}")

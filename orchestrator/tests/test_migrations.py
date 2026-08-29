@@ -41,7 +41,9 @@ def test_init_db_stamps_legacy_database_without_losing_data(monkeypatch, tmp_pat
         session.refresh(run)
         assert run.id is not None
 
+    # A real pre-webhook deployment has the initial three tables only.
     with engine.begin() as connection:
+        connection.execute(text("DROP TABLE webhook"))
         connection.execute(
             text(
                 """INSERT INTO stepexecution
@@ -64,6 +66,7 @@ def test_init_db_stamps_legacy_database_without_losing_data(monkeypatch, tmp_pat
         }
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+    assert "webhook" in inspect(engine).get_table_names()
 
 
 def test_init_db_rejects_incompatible_legacy_schema(monkeypatch, tmp_path):

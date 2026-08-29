@@ -6,6 +6,7 @@ loop back to INCUBATE) or finish.
 """
 from dataclasses import dataclass
 
+from .config import settings
 from .models import StageKind
 
 
@@ -40,8 +41,8 @@ DEFAULT_PROTOCOL: list[Stage] = [
 STAGE_INDEX = {s.kind: i for i, s in enumerate(DEFAULT_PROTOCOL)}
 
 # Decision thresholds.
-CONFLUENCE_THRESHOLD = 0.80   # passage once the dish is this covered
-MAX_PASSAGES = 3              # finish after this many passages
+CONFLUENCE_THRESHOLD = settings.confluence_threshold  # passage once the dish is this covered
+MAX_PASSAGES = settings.max_passages                    # finish after this many passages
 
 # Finite shared equipment — this is what forces real scheduling.
 RESOURCE_CAPACITY = {"imager": 1, "incubator": 8}

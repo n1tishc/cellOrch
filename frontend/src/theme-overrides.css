@@ -1,0 +1,34 @@
+:root {
+  --text-subtle: #6b6a64;
+  --text-strong: #44443f;
+  --success: #3b6d11;
+  --warning: #b27b00;
+  --danger: #a32d2d;
+  --danger-surface: #faece7;
+  --danger-text: #993c1d;
+  --accent-surface: #e9eef5;
+  --focus-ring: #d9e7f6;
+  --line-subtle: #f0eee8;
+}
+:root[data-theme="dark"] {
+  --text-subtle: #b8b6ae;
+  --text-strong: #ecece7;
+  --success: #86c48b;
+  --warning: #e3bd67;
+  --danger: #f29a8f;
+  --danger-surface: #482824;
+  --danger-text: #ffb4a9;
+  --accent-surface: #263b52;
+  --focus-ring: #355779;
+  --line-subtle: #3a3935;
+}
+.sub,.result-count,.event time,.connection,.updated { color:var(--text-subtle); }
+.metrics { color:var(--text-strong); }.metrics .fail { color:var(--danger); }
+header button { background:var(--accent); color:var(--surface); }
+.filter-bar input,.filter-bar select,.event-controls input,.filter-chips button { border-color:var(--input); background:var(--surface); color:var(--text); }
+.resource,.card,.detail,.empty-state { background:var(--surface); border-color:var(--border); color:var(--text); }
+.card:hover,.card.active { border-color:var(--accent); }
+.utilization,.bar { background:var(--track); }.utilization i,.pipeline i.done,.pipeline-node.done { background:var(--success); }.utilization.medium i { background:var(--warning); }.utilization.high i { background:var(--danger); }
+.pipeline i { background:var(--input); }.pipeline-node { border-color:var(--muted); color:var(--muted); background:var(--surface); }.pipeline-node.done { border-color:var(--success); color:var(--surface); }.pipeline-node.current { border-color:var(--accent); color:var(--accent); box-shadow:0 0 0 3px var(--focus-ring); }
+.bar-label { color:var(--text); }.fault,.run-actions .cancel,.connection-error { background:var(--danger-surface); color:var(--danger-text); }.export,.run-actions button { background:var(--accent-surface); color:var(--accent); }
+.detail li { border-color:var(--line-subtle); }.ev-type { color:var(--accent); }.connection i { background:var(--warning); }.connection.connected i { background:var(--success); }.connection.disconnected i { background:var(--danger); }.skeleton { background:linear-gradient(90deg,var(--track) 25%,var(--page) 50%,var(--track) 75%); }

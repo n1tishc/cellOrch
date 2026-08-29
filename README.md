@@ -24,7 +24,7 @@ which can run Cellpose on actual microscopy images.
 ## Architecture
 
 ```
-React dashboard (polls /runs)
+React dashboard (SSE updates + /runs refresh)
         |
   FastAPI orchestrator  --- worker tick loop (schedules, retries, logs)
         |   |                         |
@@ -66,9 +66,9 @@ simulated ticks with no sleeping and asserts every run completes.
 
 The orchestrator applies Alembic migrations to `head` on startup. Alembic reads
 `DB_URL` through the application's Settings object, so set it before running a
-migration command. A legacy database created before Alembic is safely stamped at
-`head` only after its managed tables, columns, and indexes are validated; legacy
-step statuses are normalized before stamping. An incompatible legacy schema
+migration command. A legacy database created before Alembic is safely validated against the
+initial managed schema, stamped at that initial revision, then upgraded to
+`head`; legacy step statuses are normalized before upgrading. An incompatible legacy schema
 fails safely instead of being stamped. In-memory databases and
 `DB_MIGRATIONS_ENABLED=false` retain `SQLModel.metadata.create_all()` as a
 development/test fallback.
@@ -122,5 +122,5 @@ deploy/k8s/     Deployments + Services with health probes
 
 ## Key tunables (env)
 
-`CLOCK_FACTOR` (sim speed), `FAILURE_RATE`, `MAX_RETRIES`, `SEED_ON_START`,
-`CONFLUENCE_THRESHOLD` / `MAX_PASSAGES` (in `protocol.py`).
+`CLOCK_FACTOR` (sim speed), `FAILURE_RATE`, `MAX_RETRIES`, `BACKOFF_S`,
+`SEED_ON_START`, `CV_SERVICE_URL`, and `WORKER_STALL_SECONDS`.

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { cancelRun, exportRun, exportRuns, getMetrics, getResources, getRun, injectFault, listRuns, pauseRun, resumeRun, startRun } from "./api.js";
+import { cancelRun, createWebhook, deleteWebhook, exportRun, exportRuns, getMetrics, getResources, getRun, injectFault, listRuns, listWebhooks, pauseRun, resumeRun, setAuthTokenProvider, startRun, testWebhook } from "./api.js";
+import { firebaseEnabled, observeAuth, signInWithGoogle, signOutUser } from "./firebase.js";
 
 const STAGE_COLORS = {
   Seed: "#888780", Incubate: "#1D9E75", Image: "#1D9E75",
@@ -29,9 +30,14 @@ function Pipeline({ run }) {
       <span className={`pipeline-node ${completed || index < current ? "done" : ""} ${!completed && index === current ? "current" : ""}`} title={stage}>{stage[0]}{stage === "Passage" && run.passage_count > 0 ? `×${run.passage_count}` : ""}</span>
     </React.Fragment>)}
   </div>;
+}
 
 export default function App() {
   const [runs, setRuns] = useState([]);
+  const [totalRuns, setTotalRuns] = useState(0);
+  const [user, setUser] = useState(null);
+  const [webhooks, setWebhooks] = useState([]);
+  const [webhookUrl, setWebhookUrl] = useState("");
   const [metrics, setMetrics] = useState({});
   const [resources, setResources] = useState({ resources: {}, queue_depth: 0 });
   const [selected, setSelected] = useState(null);
@@ -47,6 +53,11 @@ export default function App() {
   const [filters, setFilters] = useState({ status: initialFilters.status || "", stage: initialFilters.stage || "", search: initialFilters.search || "", sort: initialFilters.sort || "created_at", direction: initialFilters.direction || "desc" });
   const [theme, setTheme] = useState(() => localStorage.getItem("cellflow-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
 
+  useEffect(() => observeAuth((nextUser) => {
+    setUser(nextUser);
+    setAuthTokenProvider(() => nextUser?.getIdToken() || null);
+  }), []);
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("cellflow-theme", theme);
@@ -60,7 +71,8 @@ export default function App() {
   async function refresh() {
     const [runResult, metricResult, resourceResult] = await Promise.allSettled([listRuns(filters), getMetrics(), getResources()]);
     if (runResult.status === "fulfilled") {
-      setRuns(runResult.value);
+      setRuns(runResult.value.runs);
+      setTotalRuns(runResult.value.total);
       setLastUpdated(new Date());
       setError(metricResult.status === "rejected" ? "Metrics unavailable — showing run data." : "");
     } else {
@@ -69,6 +81,7 @@ export default function App() {
     }
     if (metricResult.status === "fulfilled") setMetrics(metricResult.value);
     if (resourceResult.status === "fulfilled") setResources(resourceResult.value);
+    try { setWebhooks(await listWebhooks()); } catch { /* optional dashboard panel */ }
     if (selected != null) {
       try { setDetail(await getRun(selected)); } catch { setError("Run detail unavailable."); }
     }
@@ -103,6 +116,8 @@ export default function App() {
     connect();
     document.addEventListener("visibilitychange", onVisibility);
     return () => { source?.close(); clearTimeout(retryTimer); document.removeEventListener("visibilitychange", onVisibility); };
+    // refresh reads evolving filters and selected-run state; reconnecting on each update is undesirable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, filters]);
 
   const events = detail?.events ?? [];
@@ -128,6 +143,7 @@ export default function App() {
         <button onClick={async () => { await startRun(); refresh(); }}>+ Start run</button>
         <button onClick={refresh}>Retry</button>
         <button onClick={() => exportRuns()}>Export runs</button>
+        {firebaseEnabled && (user ? <button onClick={signOutUser}>Sign out {user.displayName || user.email}</button> : <button onClick={signInWithGoogle}>Sign in with Google</button>)}
         <button className="theme-toggle" aria-label="Toggle color theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? "☀" : "☾"}</button>
       </header>
 
@@ -142,7 +158,7 @@ export default function App() {
         <input placeholder="Search runs" value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} />
         <select value={`${filters.sort}:${filters.direction}`} onChange={(event) => { const [sort, direction] = event.target.value.split(":"); setFilters({ ...filters, sort, direction }); }}><option value="created_at:desc">Newest</option><option value="created_at:asc">Oldest</option><option value="name:asc">Name A-Z</option><option value="name:desc">Name Z-A</option></select>
       </div>
-      <p className="result-count">Showing {runs.length} runs</p>
+      <p className="result-count">Showing {runs.length} of {totalRuns} runs</p>
       <div className="grid">
         {loading && Array.from({ length: 6 }, (_, index) => <div className="card skeleton" key={index} />)}
         {!loading && runs.length === 0 && <div className="empty-state">No runs yet. Start a run to begin the protocol.</div>}
@@ -173,6 +189,15 @@ export default function App() {
           </div>
         ))}
       </div>
+
+      <section className="webhook-panel">
+        <h2>Webhooks</h2>
+        <form onSubmit={async (event) => { event.preventDefault(); await createWebhook({ url: webhookUrl, events: ["run.failed", "run.completed"] }); setWebhookUrl(""); setWebhooks(await listWebhooks()); }}>
+          <input aria-label="Webhook URL" type="url" required placeholder="https://example.com/hook" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} />
+          <button>Add webhook</button>
+        </form>
+        <ul>{webhooks.map((hook) => <li key={hook.id}>{hook.url} <button onClick={async () => { await testWebhook(hook.id); }}>Test</button> <button onClick={async () => { await deleteWebhook(hook.id); setWebhooks(await listWebhooks()); }}>Delete</button></li>)}</ul>
+      </section>
 
       {detail && (
         <div className="detail">

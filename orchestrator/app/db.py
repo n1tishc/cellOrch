@@ -19,6 +19,8 @@ engine = create_engine(
 
 _ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
 _MIGRATIONS_DIR = _ALEMBIC_INI.parent / "migrations"
+_INITIAL_REVISION = "90202e1e68ac"
+_INITIAL_TABLES = {"run", "stepexecution", "event"}
 
 
 def _alembic_config() -> Config:
@@ -50,10 +52,10 @@ def _is_unversioned_legacy_schema() -> bool:
         return False
     if not tables & managed_tables:
         return False
-    if not managed_tables <= tables:
+    if not _INITIAL_TABLES <= tables:
         raise RuntimeError("Cannot safely migrate an incomplete unversioned legacy schema")
 
-    for name in managed_tables:
+    for name in _INITIAL_TABLES:
         model_table = SQLModel.metadata.tables[name]
         expected_columns = {column.name for column in model_table.columns}
         actual_columns = {column["name"] for column in inspector.get_columns(name)}
@@ -94,9 +96,8 @@ def init_db() -> None:
         config = _alembic_config()
         if _is_unversioned_legacy_schema():
             _normalize_legacy_step_statuses()
-            command.stamp(config, "head")
-        else:
-            command.upgrade(config, "head")
+            command.stamp(config, _INITIAL_REVISION)
+        command.upgrade(config, "head")
     else:
         SQLModel.metadata.create_all(engine)
 
