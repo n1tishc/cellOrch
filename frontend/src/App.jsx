@@ -45,6 +45,12 @@ export default function App() {
   const [eventLimit, setEventLimit] = useState(50);
   const initialFilters = Object.fromEntries(new URLSearchParams(window.location.search));
   const [filters, setFilters] = useState({ status: initialFilters.status || "", stage: initialFilters.stage || "", search: initialFilters.search || "", sort: initialFilters.sort || "created_at", direction: initialFilters.direction || "desc" });
+  const [theme, setTheme] = useState(() => localStorage.getItem("cellflow-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("cellflow-theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value && value !== "created_at" && value !== "desc"));
@@ -121,6 +127,7 @@ export default function App() {
         </div>
         <button onClick={async () => { await startRun(); refresh(); }}>+ Start run</button>
         <button onClick={refresh}>Retry</button>
+        <button className="theme-toggle" aria-label="Toggle color theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? "☀" : "☾"}</button>
       </header>
 
       <section className="resource-panel">
