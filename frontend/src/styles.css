@@ -25,6 +25,7 @@ header button { background: #185fa5; color: #fff; border: 0; border-radius: 8px;
 .bar-fill { background: #1d9e75; height: 100%; transition: width .4s; }
 .bar-label { position: absolute; right: 8px; top: 2px; font-size: 11px; color: #2c2c2a; }
 .fault { margin-top: 10px; width: 100%; background: #faece7; color: #993c1d; border: 0; border-radius: 6px; padding: 5px; cursor: pointer; font-size: 12px; }
+.export { margin-top: 6px; width: 100%; background: #e9eef5; color: #185fa5; border: 0; border-radius: 6px; padding: 5px; cursor: pointer; font-size: 12px; }
 .run-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 10px; }
 .run-actions button { border: 0; border-radius: 6px; padding: 5px; cursor: pointer; background: #e9eef5; color: #185fa5; font-size: 12px; }
 .run-actions .cancel { background: #faece7; color: #993c1d; }

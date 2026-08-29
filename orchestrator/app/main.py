@@ -10,6 +10,8 @@ Endpoints:
   GET  /metrics              simple counters
 """
 import asyncio
+import csv
+import io
 import json
 from contextlib import asynccontextmanager
 from typing import Literal
@@ -18,7 +20,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlmodel import select
 
@@ -169,6 +171,58 @@ def list_runs(
         runs = s.exec(statement).all()
         stage_names = [item.name for item in protocol.DEFAULT_PROTOCOL]
         return [{**run.model_dump(), "stage_name": stage_names[run.current_stage]} for run in runs]
+
+
+def _download(content: str, filename: str, media_type: str) -> Response:
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/runs/export")
+def export_runs(format: Literal["csv", "json"] = "csv"):
+    with get_session() as s:
+        runs = s.exec(select(Run).order_by(Run.id)).all()
+        summaries = [
+            {"id": run.id, "name": run.name, "status": run.status.value, "current_stage": run.current_stage,
+             "passage_count": run.passage_count, "confluence": run.confluence,
+             "created_at": run.created_at.isoformat(), "updated_at": run.updated_at.isoformat()}
+            for run in runs
+        ]
+        if format == "json":
+            return _download(json.dumps(summaries), "runs.json", "application/json")
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=["id", "name", "status", "current_stage", "passage_count", "confluence", "created_at", "updated_at"])
+        writer.writeheader(); writer.writerows(summaries)
+        return _download(output.getvalue(), "runs.csv", "text/csv")
+
+
+@app.get("/runs/{run_id}/export")
+def export_run(run_id: int, format: Literal["csv", "json"] = "csv"):
+    with get_session() as s:
+        run = s.get(Run, run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+        steps = s.exec(select(StepExecution).where(StepExecution.run_id == run_id).order_by(StepExecution.id)).all()
+        events = s.exec(select(Event).where(Event.run_id == run_id).order_by(Event.id)).all()
+        payload = {
+            "run": run.model_dump(mode="json"),
+            "steps": [step.model_dump(mode="json") for step in steps],
+            "events": [event.model_dump(mode="json") for event in events],
+        }
+        if format == "json":
+            return _download(json.dumps(payload), f"run_{run_id}.json", "application/json")
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=["record_type", "id", "stage", "status", "attempt", "type", "message", "started_at", "finish_at", "error", "created_at"])
+        writer.writeheader()
+        writer.writerow({"record_type": "run", "id": run.id, "status": run.status.value, "created_at": run.created_at.isoformat()})
+        for step in steps:
+            writer.writerow({"record_type": "step", "id": step.id, "stage": step.stage_name, "status": step.status.value, "attempt": step.attempt, "started_at": step.started_at.isoformat(), "finish_at": step.finish_at.isoformat() if step.finish_at else "", "error": step.error or ""})
+        for event in events:
+            writer.writerow({"record_type": "event", "id": event.id, "type": event.type, "message": event.message, "created_at": event.created_at.isoformat()})
+        return _download(output.getvalue(), f"run_{run_id}.csv", "text/csv")
 
 
 @app.get("/runs/stream")

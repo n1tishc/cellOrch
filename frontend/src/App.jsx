@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { cancelRun, getMetrics, getResources, getRun, injectFault, listRuns, pauseRun, resumeRun, startRun } from "./api.js";
+import { cancelRun, exportRun, exportRuns, getMetrics, getResources, getRun, injectFault, listRuns, pauseRun, resumeRun, startRun } from "./api.js";
 
 const STAGE_COLORS = {
   Seed: "#888780", Incubate: "#1D9E75", Image: "#1D9E75",
@@ -127,6 +127,7 @@ export default function App() {
         </div>
         <button onClick={async () => { await startRun(); refresh(); }}>+ Start run</button>
         <button onClick={refresh}>Retry</button>
+        <button onClick={() => exportRuns()}>Export runs</button>
         <button className="theme-toggle" aria-label="Toggle color theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? "☀" : "☾"}</button>
       </header>
 
@@ -168,6 +169,7 @@ export default function App() {
               <button className="cancel" disabled={['COMPLETED', 'FAILED', 'CANCELLED'].includes(r.status)} onClick={async () => { await cancelRun(r.id); refresh(); }}>Cancel</button>
             </div>
             <button className="fault" onClick={(e) => { e.stopPropagation(); injectFault(r.id); }}>Inject fault</button>
+            <button className="export" onClick={(e) => { e.stopPropagation(); exportRun(r.id); }}>Export</button>
           </div>
         ))}
       </div>

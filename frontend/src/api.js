@@ -32,3 +32,5 @@ export async function injectFault(id) {
 export async function startRun() {
   await fetch(`${BASE}/runs`, { method: "POST" });
 }
+export function exportRun(id, format = "csv") { window.open(`${BASE}/runs/${id}/export?format=${format}`, "_blank"); }
+export function exportRuns(format = "csv") { window.open(`${BASE}/runs/export?format=${format}`, "_blank"); }
