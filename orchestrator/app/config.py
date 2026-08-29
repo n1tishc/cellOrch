@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     db_url: str = "sqlite:///cellflow.db"
     db_migrations_enabled: bool = True
     cv_service_url: str = "http://cv-service:8001"
+    cors_origins: str = "http://localhost:5173"
+    firebase_auth_enabled: bool = False
 
     clock_factor: float = 4.0
     failure_rate: float = 0.05

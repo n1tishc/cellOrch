@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import select
 
 from . import engine, protocol
+from .auth import get_current_user
 from .config import settings
 from .db import get_session, init_db
 from .logging_config import configure_logging, get_logger, request_id_var
@@ -92,7 +93,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CellFlow Orchestrator", lifespan=lifespan)
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    CORSMiddleware, allow_origins=settings.cors_origins.split(","), allow_methods=["*"], allow_headers=["*"],
 )
 
 
@@ -129,7 +130,7 @@ async def request_context_middleware(request: Request, call_next):
 
 
 @app.post("/runs")
-def create_run(req: CreateRunRequest = Depends()):
+def create_run(req: CreateRunRequest = Depends(), user: dict = Depends(get_current_user)):
     with get_session() as s:
         n = s.exec(select(Run)).all()
         run = Run(name=req.name or f"Line-{len(n)+1:02d}")
@@ -199,7 +200,7 @@ def get_run(run_id: int):
 
 
 @app.post("/runs/{run_id}/pause")
-def pause_run(run_id: int):
+def pause_run(run_id: int, user: dict = Depends(get_current_user)):
     with get_session() as s:
         run = s.get(Run, run_id)
         if not run:
@@ -216,7 +217,7 @@ def pause_run(run_id: int):
 
 
 @app.post("/runs/{run_id}/resume")
-def resume_run(run_id: int):
+def resume_run(run_id: int, user: dict = Depends(get_current_user)):
     with get_session() as s:
         run = s.get(Run, run_id)
         if not run:
@@ -231,7 +232,7 @@ def resume_run(run_id: int):
 
 
 @app.post("/runs/{run_id}/cancel")
-def cancel_run(run_id: int):
+def cancel_run(run_id: int, user: dict = Depends(get_current_user)):
     with get_session() as s:
         run = s.get(Run, run_id)
         if not run:
@@ -248,7 +249,7 @@ def cancel_run(run_id: int):
 
 
 @app.post("/runs/{run_id}/inject-fault")
-def inject_fault(run_id: int):
+def inject_fault(run_id: int, user: dict = Depends(get_current_user)):
     with get_session() as s:
         run = s.get(Run, run_id)
         if not run:
@@ -260,7 +261,7 @@ def inject_fault(run_id: int):
 
 
 @app.post("/seed")
-def seed(req: SeedRequest = Depends()):
+def seed(req: SeedRequest = Depends(), user: dict = Depends(get_current_user)):
     with get_session() as s:
         created = seed_runs(s, req.n)
         return {"created": created}
