@@ -30,7 +30,7 @@ from .logging_config import configure_logging, get_logger, request_id_var
 from .run_events import subscribe, unsubscribe
 from .models import (
     CANCELLED, COMPLETED, FAILED, PAUSED, PENDING, RUNNING, WAITING,
-    Event, Run, RunStatus, StepExecution, utcnow,
+    Event, Run, RunStatus, StepExecution, Webhook, utcnow,
 )
 from .seed import seed_runs
 
@@ -50,6 +50,11 @@ class CreateRunRequest(BaseModel):
 
 class SeedRequest(BaseModel):
     n: int = Field(default=10, ge=1, le=100)
+
+
+class WebhookRequest(BaseModel):
+    url: str
+    events: list[str]
 
 
 class ErrorResponse(BaseModel):
@@ -258,6 +263,29 @@ def inject_fault(run_id: int, user: dict = Depends(get_current_user)):
         s.add(run)
         s.commit()
         return {"ok": True, "run_id": run_id}
+
+
+@app.post("/webhooks")
+def create_webhook(request: WebhookRequest, user: dict = Depends(get_current_user)):
+    with get_session() as s:
+        hook = Webhook(url=request.url, events=json.dumps(request.events))
+        s.add(hook); s.commit(); s.refresh(hook)
+        return hook
+
+
+@app.get("/webhooks")
+def list_webhooks():
+    with get_session() as s:
+        return s.exec(select(Webhook)).all()
+
+
+@app.delete("/webhooks/{webhook_id}")
+def delete_webhook(webhook_id: int, user: dict = Depends(get_current_user)):
+    with get_session() as s:
+        hook = s.get(Webhook, webhook_id)
+        if not hook: raise HTTPException(404, "webhook not found")
+        s.delete(hook); s.commit()
+        return {"ok": True}
 
 
 @app.post("/seed")

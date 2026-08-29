@@ -87,3 +87,11 @@ class Event(SQLModel, table=True):
     type: str
     message: str
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class Webhook(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    url: str
+    events: str = "[]"
+    active: bool = True
+    created_at: datetime = Field(default_factory=utcnow)

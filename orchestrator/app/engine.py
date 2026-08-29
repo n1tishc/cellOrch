@@ -22,6 +22,7 @@ from sqlmodel import Session, select
 from . import cv_client, protocol
 from .config import settings
 from .run_events import publish
+from .webhooks import fire_webhooks
 from .models import (
     ACTIVE_STATUSES, COMPLETED, FAILED, PENDING, RUNNING, WAITING,
     Event, Run, StepExecution, StepStatus, utcnow,
@@ -36,7 +37,13 @@ BACKOFF_S = settings.backoff_s  # sim seconds before a retry
 def log(session: Session, run_id: int, type_: str, message: str) -> None:
     event = Event(run_id=run_id, type=type_, message=message)
     session.add(event)
+    payload = {"event_type": type_, "run_id": run_id, "message": message, "timestamp": event.created_at.isoformat()}
     publish({"run_id": run_id, "type": type_, "message": message, "created_at": event.created_at.isoformat()})
+    try:
+        fire_webhooks(session, type_, payload)
+    except Exception:
+        # Webhook delivery must never block the orchestration path.
+        pass
 
 
 def _real_duration(sim_seconds: float) -> timedelta:
