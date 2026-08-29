@@ -21,6 +21,7 @@ from sqlmodel import Session, select
 
 from . import cv_client, protocol
 from .config import settings
+from .run_events import publish
 from .models import (
     ACTIVE_STATUSES, COMPLETED, FAILED, PENDING, RUNNING, WAITING,
     Event, Run, StepExecution, StepStatus, utcnow,
@@ -33,7 +34,9 @@ BACKOFF_S = settings.backoff_s  # sim seconds before a retry
 
 
 def log(session: Session, run_id: int, type_: str, message: str) -> None:
-    session.add(Event(run_id=run_id, type=type_, message=message))
+    event = Event(run_id=run_id, type=type_, message=message)
+    session.add(event)
+    publish({"run_id": run_id, "type": type_, "message": message, "created_at": event.created_at.isoformat()})
 
 
 def _real_duration(sim_seconds: float) -> timedelta:

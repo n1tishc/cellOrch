@@ -10,13 +10,14 @@ Endpoints:
   GET  /metrics              simple counters
 """
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlmodel import select
 
@@ -24,6 +25,7 @@ from . import engine, protocol
 from .config import settings
 from .db import get_session, init_db
 from .logging_config import configure_logging, get_logger, request_id_var
+from .run_events import subscribe, unsubscribe
 from .models import (
     CANCELLED, COMPLETED, FAILED, PAUSED, PENDING, RUNNING, WAITING,
     Event, Run, StepExecution, utcnow,
@@ -147,6 +149,20 @@ def list_runs():
         ]
 
 
+@app.get("/runs/stream")
+async def stream_runs():
+    async def events():
+        queue = subscribe()
+        try:
+            while True:
+                event = await queue.get()
+                yield f"data: {json.dumps(event)}\\n\\n"
+        finally:
+            unsubscribe(queue)
+
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+
 @app.get("/runs/{run_id}")
 def get_run(run_id: int):
     with get_session() as s:
@@ -159,7 +175,11 @@ def get_run(run_id: int):
         events = s.exec(
             select(Event).where(Event.run_id == run_id).order_by(Event.id.desc())
         ).all()
-        return {"run": run, "steps": steps, "events": events}
+        return {
+            "run": {**run.model_dump(), "stage_name": protocol.DEFAULT_PROTOCOL[run.current_stage].name},
+            "steps": steps,
+            "events": events,
+        }
 
 
 @app.post("/runs/{run_id}/pause")

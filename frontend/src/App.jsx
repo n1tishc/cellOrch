@@ -32,9 +32,30 @@ export default function App() {
   }
 
   useEffect(() => {
+    let source;
+    let retryTimer;
+    let attempts = 0;
+    const streamUrl = `${import.meta.env.VITE_API_URL || "http://localhost:8000"}/runs/stream`;
+    const connect = () => {
+      if (document.hidden) return;
+      source = new EventSource(streamUrl);
+      source.onopen = () => { attempts = 0; };
+      source.onmessage = async ({ data }) => {
+        const event = JSON.parse(data);
+        const update = await getRun(event.run_id);
+        setRuns((current) => current.map((run) => run.id === event.run_id ? update.run : run));
+        if (selected === event.run_id) setDetail(update);
+      };
+      source.onerror = () => {
+        source.close();
+        retryTimer = setTimeout(connect, Math.min(30000, 1000 * 2 ** attempts++));
+      };
+    };
+    const onVisibility = () => { source?.close(); clearTimeout(retryTimer); if (!document.hidden) connect(); };
     refresh();
-    const t = setInterval(refresh, 2000);
-    return () => clearInterval(t);
+    connect();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { source?.close(); clearTimeout(retryTimer); document.removeEventListener("visibilitychange", onVisibility); };
   }, [selected]);
 
   return (

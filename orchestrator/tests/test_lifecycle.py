@@ -18,8 +18,9 @@ from app.models import Run, RunStatus, StepExecution, StepStatus  # noqa: E402
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     original_engine = db.engine
+    monkeypatch.setattr(db.settings, "db_url", "sqlite:///:memory:")
     db.engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
