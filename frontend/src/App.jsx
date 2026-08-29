@@ -40,6 +40,9 @@ export default function App() {
   const [connection, setConnection] = useState("connecting");
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [eventSearch, setEventSearch] = useState("");
+  const [hiddenEventTypes, setHiddenEventTypes] = useState(new Set());
+  const [eventLimit, setEventLimit] = useState(50);
 
   async function refresh() {
     const [runResult, metricResult, resourceResult] = await Promise.allSettled([listRuns(), getMetrics(), getResources()]);
@@ -88,6 +91,12 @@ export default function App() {
     document.addEventListener("visibilitychange", onVisibility);
     return () => { source?.close(); clearTimeout(retryTimer); document.removeEventListener("visibilitychange", onVisibility); };
   }, [selected]);
+
+  const events = detail?.events ?? [];
+  const eventTypes = [...new Set(events.map((event) => event.type))].sort();
+  const visibleEvents = events.filter((event) => !hiddenEventTypes.has(event.type) && event.message.toLowerCase().includes(eventSearch.toLowerCase())).slice(0, eventLimit);
+  const eventColor = (type) => ({ step_started: "blue", step_done: "green", retry: "yellow", failed: "red", completed: "green-bold", decision: "purple", passage: "orange", queued: "gray" }[type] || "gray");
+  const relativeTime = (time) => { const seconds = Math.max(0, (Date.now() - new Date(time)) / 1000); return seconds < 60 ? "just now" : seconds < 3600 ? `${Math.floor(seconds / 60)}m ago` : `${Math.floor(seconds / 3600)}h ago`; };
 
   return (
     <div className="wrap">
@@ -145,13 +154,9 @@ export default function App() {
       {detail && (
         <div className="detail">
           <h2>{detail.run.name} — audit log</h2>
-          <ul>
-            {detail.events.map((ev) => (
-              <li key={ev.id}>
-                <span className="ev-type">{ev.type}</span> {ev.message}
-              </li>
-            ))}
-          </ul>
+          <div className="event-controls"><input aria-label="Search audit events" placeholder="Search events" value={eventSearch} onChange={(event) => { setEventSearch(event.target.value); setEventLimit(50); }} /><div className="filter-chips">{eventTypes.map((type) => <button key={type} className={hiddenEventTypes.has(type) ? "is-hidden" : ""} onClick={() => { setHiddenEventTypes((current) => { const next = new Set(current); next.has(type) ? next.delete(type) : next.add(type); return next; }); setEventLimit(50); }}>{type}</button>)}</div></div>
+          <ul className="timeline">{visibleEvents.map((ev) => <li key={ev.id} className={`event event-${eventColor(ev.type)}`}><time title={new Date(ev.created_at).toLocaleString()}>{relativeTime(ev.created_at)}</time><span className="ev-type">{ev.type}</span><span>{ev.message}</span></li>)}</ul>
+          {events.filter((event) => !hiddenEventTypes.has(event.type) && event.message.toLowerCase().includes(eventSearch.toLowerCase())).length > eventLimit && <button onClick={() => setEventLimit((limit) => limit + 50)}>Load more</button>}
         </div>
       )}
     </div>

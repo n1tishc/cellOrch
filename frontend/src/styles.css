@@ -29,7 +29,7 @@ header button { background: #185fa5; color: #fff; border: 0; border-radius: 8px;
 .detail { background: #fff; border: 1px solid #e4e2da; border-radius: 12px; padding: 16px; margin-top: 20px; }
 .detail h2 { font-size: 16px; margin: 0 0 10px; }
 .detail ul { list-style: none; padding: 0; margin: 0; max-height: 260px; overflow: auto; font-size: 13px; }
-.detail li { padding: 4px 0; border-bottom: 1px solid #f0eee8; }
+.detail li { padding: 4px 0; border-bottom: 1px solid #f0eee8; }.event-controls { display: grid; gap: 8px; margin-bottom: 10px; }.event-controls input { padding: 7px; border: 1px solid #d5d3cb; border-radius: 6px; }.filter-chips { display: flex; gap: 5px; flex-wrap: wrap; }.filter-chips button { border: 1px solid #d5d3cb; background:#fff; border-radius: 999px; font-size:11px; padding:3px 7px; }.filter-chips .is-hidden { opacity:.4; text-decoration:line-through; }.timeline { list-style:none; padding:0; margin:0; max-height:400px; overflow:auto; }.event { display:grid; grid-template-columns:65px 90px 1fr; gap:8px; border-left:4px solid #888780; padding:7px; }.event time { color:#6b6a64; font-size:11px; }.event-blue{border-color:#185fa5}.event-green{border-color:#3b6d11}.event-yellow{border-color:#b27b00}.event-red{border-color:#a32d2d}.event-green-bold{border-color:#3b6d11;font-weight:700}.event-purple{border-color:#534ab7}.event-orange{border-color:#ba7517}.event-gray{border-color:#888780}
 .ev-type { display: inline-block; min-width: 90px; color: #534ab7; font-weight: 500; }
 .connection, .updated { font-size: 12px; color: #6b6a64; }
 .connection i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; background: #b27b00; }
