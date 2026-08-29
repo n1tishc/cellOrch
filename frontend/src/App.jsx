@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { cancelRun, getMetrics, getRun, injectFault, listRuns, pauseRun, resumeRun, startRun } from "./api.js";
+import { cancelRun, getMetrics, getResources, getRun, injectFault, listRuns, pauseRun, resumeRun, startRun } from "./api.js";
 
 const STAGE_COLORS = {
   Seed: "#888780", Incubate: "#1D9E75", Image: "#1D9E75",
@@ -22,6 +22,7 @@ function Bar({ value }) {
 export default function App() {
   const [runs, setRuns] = useState([]);
   const [metrics, setMetrics] = useState({});
+  const [resources, setResources] = useState({ resources: {}, queue_depth: 0 });
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -30,7 +31,7 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState(null);
 
   async function refresh() {
-    const [runResult, metricResult] = await Promise.allSettled([listRuns(), getMetrics()]);
+    const [runResult, metricResult, resourceResult] = await Promise.allSettled([listRuns(), getMetrics(), getResources()]);
     if (runResult.status === "fulfilled") {
       setRuns(runResult.value);
       setLastUpdated(new Date());
@@ -40,6 +41,7 @@ export default function App() {
       setConnection("disconnected");
     }
     if (metricResult.status === "fulfilled") setMetrics(metricResult.value);
+    if (resourceResult.status === "fulfilled") setResources(resourceResult.value);
     if (selected != null) {
       try { setDetail(await getRun(selected)); } catch { setError("Run detail unavailable."); }
     }
@@ -60,6 +62,7 @@ export default function App() {
         const update = await getRun(event.run_id);
         setRuns((current) => current.map((run) => run.id === event.run_id ? update.run : run));
         if (selected === event.run_id) setDetail(update);
+        getResources().then(setResources).catch(() => {});
       };
       source.onerror = () => {
         source.close();
@@ -93,6 +96,10 @@ export default function App() {
         <button onClick={refresh}>Retry</button>
       </header>
 
+      <section className="resource-panel">
+        {Object.entries(resources.resources).map(([name, resource]) => <div className="resource" key={name}><span>{name}</span><b>{resource.used}/{resource.capacity}</b><div className={`utilization ${resource.used / resource.capacity > .8 ? "high" : resource.used / resource.capacity >= .5 ? "medium" : "low"}`}><i style={{ width: `${resource.used / resource.capacity * 100}%` }} /></div></div>)}
+        <div className="resource queue"><span>Queue depth</span><b>{resources.queue_depth}</b></div>
+      </section>
       {error && <div className="connection-error" role="alert">{error}</div>}
       <div className="grid">
         {loading && Array.from({ length: 6 }, (_, index) => <div className="card skeleton" key={index} />)}

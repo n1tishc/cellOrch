@@ -262,6 +262,19 @@ def readyz():
     return {"status": "ready"}
 
 
+@app.get("/resources")
+def resources():
+    with get_session() as s:
+        usage = engine._resource_usage(s)
+        return {
+            "resources": {
+                name: {"used": usage[name], "capacity": capacity}
+                for name, capacity in protocol.RESOURCE_CAPACITY.items()
+            },
+            "queue_depth": len(s.exec(select(Run).where(Run.status == WAITING)).all()),
+        }
+
+
 @app.get("/metrics")
 def metrics():
     with get_session() as s:

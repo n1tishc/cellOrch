@@ -9,6 +9,9 @@ header h1 { margin: 0; font-size: 24px; font-weight: 600; }
 .metrics .fail { color: #a32d2d; }
 header button { background: #185fa5; color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; font-size: 14px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+.resource-panel { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 16px; }
+.resource { min-width: 170px; flex: 1; display: grid; grid-template-columns: 1fr auto; gap: 5px 10px; padding: 10px; background: #fff; border: 1px solid #e4e2da; border-radius: 8px; font-size: 13px; }
+.utilization { grid-column: 1 / -1; height: 7px; border-radius: 8px; background: #eceae2; overflow: hidden; }.utilization i { display:block; height:100%; background:#3b6d11; }.utilization.medium i { background:#b27b00; }.utilization.high i { background:#a32d2d; }
 .card { background: #fff; border: 1px solid #e4e2da; border-radius: 12px; padding: 14px; cursor: pointer; transition: border-color .15s; }
 .card:hover, .card.active { border-color: #185fa5; }
 .card-top { display: flex; justify-content: space-between; align-items: center; }

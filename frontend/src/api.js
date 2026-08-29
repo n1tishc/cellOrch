@@ -8,6 +8,10 @@ export async function getMetrics() {
   const r = await fetch(`${BASE}/metrics`);
   return r.json();
 }
+export async function getResources() {
+  const r = await fetch(`${BASE}/resources`);
+  return r.json();
+}
 export async function getRun(id) {
   const r = await fetch(`${BASE}/runs/${id}`);
   return r.json();
