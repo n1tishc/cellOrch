@@ -19,12 +19,17 @@ which can run Cellpose on actual microscopy images.
 - **Perception in the loop** — the imaging stage calls the CV service; the
   returned confluence decides whether a line is passaged or keeps growing.
 - **Traceability** — every transition is written to an audit log.
+- **Live operations view** — SSE-triggered refreshes keep the dashboard current;
+  a connected protocol map shows actual active, running, waiting, and paused
+  runs at each stage.
+- **Data import** — a CSV endpoint creates real runs in SQLite, with a baseline
+  fixture included for repeatable manual checks.
 - **Operability** — containerized, health probes, CI, Kubernetes manifests.
 
 ## Architecture
 
 ```
-React dashboard (SSE updates + /runs refresh)
+React dashboard (SSE updates + live refresh)
         |
   FastAPI orchestrator  --- worker tick loop (schedules, retries, logs)
         |   |                         |
@@ -33,8 +38,8 @@ React dashboard (SSE updates + /runs refresh)
         +--> HTTP --> CV service (FastAPI + Cellpose) --> {confluence, cell_count}
 ```
 
-Each cell line flows: `Seed -> Incubate -> Image -> Count -> Decision`, where
-Decision either passages it (and loops back to Incubate) or, after enough
+Each cell line flows: `Seed -> Incubate -> Image -> Count -> Decision -> Passage`,
+where Decision either passages it (and loops back to Incubate) or, after enough
 passages, completes it.
 
 ## Quick start
@@ -45,13 +50,52 @@ docker compose up --build
 # API:       http://localhost:8000/runs   (docs at /docs)
 ```
 
+Compose starts with an empty database (`SEED_ON_START=0`). Create a run from the
+dashboard or import the provided baseline CSV from **Data → Import real runs**:
+
+```text
+orchestrator/samples/baseline-runs.csv
+```
+
+The importer accepts a UTF-8 CSV with a required `name` column, supports up to
+100 rows, and stores each new run in SQLite. Names may contain letters, digits,
+spaces, `_`, and `-`.
+
 Or run the orchestrator alone:
 
 ```bash
 cd orchestrator
 pip install -r requirements.txt
-uvicorn app.main:app --reload      # seeds 10 runs and starts ticking
+uvicorn app.main:app --reload      # starts with an empty database and ticking worker
 ```
+
+### Start fresh
+
+To permanently remove all local SQLite runs, audit events, imported data, and
+webhooks, remove only the orchestrator data volume, then recreate the services:
+
+```bash
+docker compose stop orchestrator
+docker compose rm -sf orchestrator orchestrator-init
+docker volume rm cellflow_orchestrator-data
+docker compose up -d orchestrator-init orchestrator
+```
+
+Do not use this command sequence for data you need to keep.
+
+## Dashboard and analytics
+
+The overview is deliberately split into two complementary views:
+
+- The **protocol map** is the fast operational view. Each connected stage shows
+  actual SQLite-backed counts for active, running, and held (waiting or paused)
+  runs. Selecting a stage filters the run registry.
+- The **run registry** is the precise control surface for search, filters,
+  pause/resume/cancel actions, exports, and the per-run audit timeline.
+
+`GET /analytics` powers the dashboard with persisted run states, stage-state
+counts, recent audit events, event activity, completion rate, and measured step
+durations. It does not manufacture activity for empty databases.
 
 ## Tests
 

@@ -69,6 +69,45 @@ def test_init_db_stamps_legacy_database_without_losing_data(monkeypatch, tmp_pat
     assert "webhook" in inspect(engine).get_table_names()
 
 
+def test_init_db_accepts_pre_enum_sqlite_varchar_schema(monkeypatch, tmp_path):
+    """The pre-migration app stored enum-like fields as unbounded VARCHAR."""
+    engine = configure_file_database(monkeypatch, tmp_path)
+    with engine.begin() as connection:
+        connection.execute(text("""CREATE TABLE run (
+            id INTEGER NOT NULL PRIMARY KEY, name VARCHAR NOT NULL, status VARCHAR NOT NULL,
+            current_stage INTEGER NOT NULL, passage_count INTEGER NOT NULL,
+            image_count INTEGER NOT NULL, confluence FLOAT NOT NULL,
+            force_fail_next BOOLEAN NOT NULL, created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL
+        )"""))
+        connection.execute(text("""CREATE TABLE stepexecution (
+            id INTEGER NOT NULL PRIMARY KEY, run_id INTEGER NOT NULL,
+            stage_name VARCHAR NOT NULL, stage_kind VARCHAR NOT NULL,
+            status VARCHAR NOT NULL, attempt INTEGER NOT NULL,
+            started_at DATETIME NOT NULL, finish_at DATETIME,
+            result_json VARCHAR, error VARCHAR
+        )"""))
+        connection.execute(text("""CREATE TABLE event (
+            id INTEGER NOT NULL PRIMARY KEY, run_id INTEGER NOT NULL,
+            type VARCHAR NOT NULL, message VARCHAR NOT NULL, created_at DATETIME NOT NULL
+        )"""))
+        connection.execute(text("CREATE INDEX ix_event_run_id ON event (run_id)"))
+        connection.execute(text("CREATE INDEX ix_stepexecution_run_id ON stepexecution (run_id)"))
+        connection.execute(text("""INSERT INTO run
+            (id, name, status, current_stage, passage_count, image_count, confluence,
+             force_fail_next, created_at, updated_at)
+            VALUES (1, 'Legacy line', 'PENDING', 0, 0, 0, 0.0, 0,
+                    '2026-01-01 00:00:00', '2026-01-01 00:00:00')"""))
+
+    db.init_db()
+
+    with Session(engine) as session:
+        assert session.get(Run, 1).name == "Legacy line"
+    assert "webhook" in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+
+
 def test_init_db_rejects_incompatible_legacy_schema(monkeypatch, tmp_path):
     engine = configure_file_database(monkeypatch, tmp_path)
     with engine.begin() as connection:

@@ -13,7 +13,7 @@ import asyncio
 import csv
 import io
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from typing import Literal
 from uuid import uuid4
@@ -24,7 +24,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlmodel import select
 
 from . import engine, protocol
@@ -256,11 +256,44 @@ async def stream_runs():
         try:
             while True:
                 event = await queue.get()
-                yield f"data: {json.dumps(event)}\\n\\n"
+                yield f"data: {json.dumps(event)}\n\n"
         finally:
             unsubscribe(queue)
 
     return StreamingResponse(events(), media_type="text/event-stream")
+
+
+@app.post("/runs/import")
+async def import_runs(request: Request, user: dict = Depends(get_current_user)):
+    """Import up to 100 new cell-line runs from a UTF-8 CSV with a name column."""
+    raw_csv = await request.body()
+    if len(raw_csv) > 1_000_000:
+        raise HTTPException(413, "CSV must be smaller than 1 MB")
+    try:
+        reader = csv.DictReader(io.StringIO(raw_csv.decode("utf-8-sig")))
+    except UnicodeDecodeError as exc:
+        raise HTTPException(422, "CSV must be UTF-8 encoded") from exc
+    if not reader.fieldnames or "name" not in reader.fieldnames:
+        raise HTTPException(422, "CSV must contain a name column")
+
+    requests: list[CreateRunRequest] = []
+    for line_number, row in enumerate(reader, start=2):
+        name = (row.get("name") or "").strip()
+        if not name:
+            raise HTTPException(422, f"row {line_number}: name is required")
+        try:
+            requests.append(CreateRunRequest(name=name))
+        except ValidationError as exc:
+            raise HTTPException(422, f"row {line_number}: invalid name") from exc
+    if not requests:
+        raise HTTPException(422, "CSV must contain at least one run")
+    if len(requests) > 100:
+        raise HTTPException(422, "CSV may contain at most 100 runs")
+
+    with get_session() as s:
+        s.add_all([Run(name=item.name) for item in requests])
+        s.commit()
+    return {"created": len(requests)}
 
 
 @app.get("/runs/{run_id}")
@@ -445,3 +478,95 @@ def metrics():
             "retries_total": retries,
             "audit_events_total": len(events),
         }
+
+
+@app.get("/analytics")
+def analytics():
+    """Return operational analytics calculated only from persisted SQLite records."""
+    with get_session() as s:
+        runs = s.exec(select(Run)).all()
+        events = s.exec(select(Event)).all()
+        steps = s.exec(select(StepExecution)).all()
+    status_counts = {status.value: 0 for status in RunStatus}
+    for run in runs:
+        status_counts[run.status.value] += 1
+    stage_counts = {stage.name: 0 for stage in protocol.DEFAULT_PROTOCOL}
+    active_stage_counts = {stage.name: 0 for stage in protocol.DEFAULT_PROTOCOL}
+    stage_state_counts = {
+        stage.name: {"active": 0, "running": 0, "waiting": 0, "paused": 0}
+        for stage in protocol.DEFAULT_PROTOCOL
+    }
+    for run in runs:
+        stage_name = protocol.DEFAULT_PROTOCOL[run.current_stage].name
+        stage_counts[stage_name] += 1
+        if run.status in (PENDING, WAITING, RUNNING, PAUSED):
+            active_stage_counts[stage_name] += 1
+            stage_state_counts[stage_name]["active"] += 1
+        if run.status == RUNNING:
+            stage_state_counts[stage_name]["running"] += 1
+        elif run.status == WAITING:
+            stage_state_counts[stage_name]["waiting"] += 1
+        elif run.status == PAUSED:
+            stage_state_counts[stage_name]["paused"] += 1
+    event_counts: dict[str, int] = {}
+    for event in events:
+        event_counts[event.type] = event_counts.get(event.type, 0) + 1
+    now = utcnow()
+    active_runs = [run for run in runs if run.status in (PENDING, WAITING, RUNNING, PAUSED)]
+    terminal_runs = [run for run in runs if run.status in (COMPLETED, FAILED, CANCELLED)]
+    completed_steps = [step for step in steps if step.finish_at is not None]
+    elapsed_minutes = [
+        max(0, (step.finish_at - step.started_at).total_seconds() / 60)
+        for step in completed_steps
+        if step.finish_at is not None
+    ]
+    event_days: dict[str, int] = {}
+    for event in events:
+        if event.created_at >= now - timedelta(days=7):
+            label = event.created_at.date().isoformat()
+            event_days[label] = event_days.get(label, 0) + 1
+    run_names = {run.id: run.name for run in runs}
+    latest_events = sorted(events, key=lambda event: event.created_at, reverse=True)[:8]
+    return {
+        "statuses": [{"label": label, "value": value} for label, value in status_counts.items() if value],
+        "stages": [{"label": label, "value": value} for label, value in stage_counts.items() if value],
+        "events": [{"label": label, "value": event_counts[label]} for label in sorted(event_counts)],
+        "active_stages": [
+            {"label": label, "value": value}
+            for label, value in active_stage_counts.items()
+            if value
+        ],
+        "stage_states": [
+            {"label": label, **values}
+            for label, values in stage_state_counts.items()
+        ],
+        "activity": [
+            {"label": label, "value": event_days[label]}
+            for label in sorted(event_days)
+        ],
+        "summary": {
+            "active_runs": len(active_runs),
+            "completion_rate": round(
+                100 * sum(run.status == COMPLETED for run in terminal_runs) / len(terminal_runs)
+            ) if terminal_runs else None,
+            "average_confluence": round(
+                100 * sum(run.confluence for run in active_runs) / len(active_runs)
+            ) if active_runs else None,
+            "average_active_age_minutes": round(
+                sum((now - run.created_at).total_seconds() / 60 for run in active_runs) / len(active_runs)
+            ) if active_runs else None,
+            "average_step_duration_minutes": round(sum(elapsed_minutes) / len(elapsed_minutes), 1) if elapsed_minutes else None,
+            "events_last_24h": sum(event.created_at >= now - timedelta(hours=24) for event in events),
+        },
+        "recent_events": [
+            {
+                "id": event.id,
+                "run_id": event.run_id,
+                "run_name": run_names.get(event.run_id, "Unknown run"),
+                "type": event.type,
+                "message": event.message,
+                "created_at": event.created_at.isoformat(),
+            }
+            for event in latest_events
+        ],
+    }

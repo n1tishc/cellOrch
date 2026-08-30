@@ -6,7 +6,9 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 FROM python:3.12-slim
 WORKDIR /app
 COPY --from=builder /install /usr/local
+COPY alembic.ini .
 COPY app ./app
+COPY migrations ./migrations
 RUN useradd --create-home --uid 10001 nonroot && mkdir /data && chown nonroot:nonroot /data
 USER nonroot
 ENV DB_URL=sqlite:////data/cellflow.db

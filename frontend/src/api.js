@@ -20,6 +20,7 @@ export async function listRuns(params = {}) {
 }
 export function getMetrics() { return json("/metrics"); }
 export function getResources() { return json("/resources"); }
+export function getAnalytics() { return json("/analytics"); }
 export function getRun(id) { return json(`/runs/${id}`); }
 function transition(id, action) { return request(`/runs/${id}/${action}`, { method: "POST" }); }
 export function pauseRun(id) { return transition(id, "pause"); }
@@ -27,6 +28,9 @@ export function resumeRun(id) { return transition(id, "resume"); }
 export function cancelRun(id) { return transition(id, "cancel"); }
 export function injectFault(id) { return request(`/runs/${id}/inject-fault`, { method: "POST" }); }
 export function startRun() { return request("/runs", { method: "POST" }); }
+export function importRuns(file) {
+  return json("/runs/import", { method: "POST", headers: { "Content-Type": "text/csv" }, body: file });
+}
 export function listWebhooks() { return json("/webhooks"); }
 export function createWebhook(payload) { return json("/webhooks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); }
 export function deleteWebhook(id) { return request(`/webhooks/${id}`, { method: "DELETE" }); }

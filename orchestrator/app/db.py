@@ -42,8 +42,19 @@ def _is_in_memory_sqlite() -> bool:
     )
 
 
+def _types_are_compatible(expected: str, actual: str) -> bool:
+    """Accept SQLite's equivalent bounded and unbounded VARCHAR declarations."""
+    if expected == actual:
+        return True
+    if engine.dialect.name != "sqlite":
+        return False
+    expected_base = expected.split("(", maxsplit=1)[0]
+    actual_base = actual.split("(", maxsplit=1)[0]
+    return expected_base == actual_base == "VARCHAR"
+
+
 def _is_unversioned_legacy_schema() -> bool:
-    """Validate that a legacy schema exactly matches the initial managed schema."""
+    """Validate that a legacy schema safely matches the initial managed schema."""
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
     managed_tables = set(SQLModel.metadata.tables)
@@ -71,7 +82,10 @@ def _is_unversioned_legacy_schema() -> bool:
         actual_indexes = {index["name"] for index in inspector.get_indexes(name)}
         if (
             expected_columns != actual_columns
-            or expected_types != actual_types
+            or any(
+                not _types_are_compatible(expected_types[column], actual_types[column])
+                for column in expected_columns
+            )
             or not expected_indexes <= actual_indexes
         ):
             raise RuntimeError("Cannot safely migrate an incompatible unversioned legacy schema")

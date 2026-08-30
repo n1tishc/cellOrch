@@ -1,4 +1,10 @@
 services:
+  orchestrator-init:
+    build: ./orchestrator
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 10001:10001 /data"]
+    volumes: ["orchestrator-data:/data"]
+
   orchestrator:
     build: ./orchestrator
     ports: ["8000:8000"]
@@ -6,9 +12,13 @@ services:
       - CV_SERVICE_URL=http://cv-service:8001
       - CLOCK_FACTOR=4
       - FAILURE_RATE=0.05
-      - SEED_ON_START=10
+      - SEED_ON_START=0
     volumes: ["orchestrator-data:/data"]
-    depends_on: [cv-service]
+    depends_on:
+      cv-service:
+        condition: service_started
+      orchestrator-init:
+        condition: service_completed_successfully
 
   cv-service:
     build: ./cv-service

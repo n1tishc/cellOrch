@@ -23,7 +23,7 @@ class Settings(BaseSettings):
 
     tick_interval: float = 1.0
     worker_stall_seconds: float = 30.0
-    seed_on_start: int = 10
+    seed_on_start: int = 0
 
     confluence_threshold: float = 0.80
     max_passages: int = 3

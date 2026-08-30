@@ -1,212 +1,80 @@
-import React, { useEffect, useState } from "react";
-import { cancelRun, createWebhook, deleteWebhook, exportRun, exportRuns, getMetrics, getResources, getRun, injectFault, listRuns, listWebhooks, pauseRun, resumeRun, setAuthTokenProvider, startRun, testWebhook } from "./api.js";
+import { useEffect, useMemo, useState } from "react";
+import { cancelRun, createWebhook, deleteWebhook, exportRun, exportRuns, getAnalytics, getMetrics, getResources, getRun, importRuns, injectFault, listRuns, listWebhooks, pauseRun, resumeRun, setAuthTokenProvider, startRun, testWebhook } from "./api.js";
 import { firebaseEnabled, observeAuth, signInWithGoogle, signOutUser } from "./firebase.js";
 
-const STAGE_COLORS = {
-  Seed: "#888780", Incubate: "#1D9E75", Image: "#1D9E75",
-  Count: "#888780", Decision: "#534AB7", Passage: "#BA7517",
-};
-const STATUS_COLORS = {
-  RUNNING: "#185FA5", WAITING: "#854F0B", PENDING: "#5F5E5A",
-  PAUSED: "#854F0B", CANCELLED: "#5F5E5A", COMPLETED: "#3B6D11", FAILED: "#A32D2D",
-};
-
-function Bar({ value }) {
-  return (
-    <div className="bar">
-      <div className="bar-fill" style={{ width: `${Math.round(value * 100)}%` }} />
-      <span className="bar-label">{Math.round(value * 100)}%</span>
-    </div>
-  );
-}
-
 const PIPELINE = ["Seed", "Incubate", "Image", "Count", "Decision", "Passage"];
-function Pipeline({ run }) {
-  const current = PIPELINE.indexOf(run.stage_name);
-  const completed = run.status === "COMPLETED";
-  return <div className="pipeline" aria-label={`Protocol stage: ${run.stage_name}`}>
-    {PIPELINE.map((stage, index) => <React.Fragment key={stage}>
-      {index > 0 && <i className={index <= current || completed ? "done" : ""} />}
-      <span className={`pipeline-node ${completed || index < current ? "done" : ""} ${!completed && index === current ? "current" : ""}`} title={stage}>{stage[0]}{stage === "Passage" && run.passage_count > 0 ? `×${run.passage_count}` : ""}</span>
-    </React.Fragment>)}
-  </div>;
+const STATUS = {
+  RUNNING: ["Running", "info"], WAITING: ["Queued", "warning"], PENDING: ["Ready", "neutral"],
+  PAUSED: ["Paused", "warning"], CANCELLED: ["Cancelled", "neutral"], COMPLETED: ["Complete", "success"], FAILED: ["Failed", "danger"],
+};
+
+function Icon({ name, size = 18 }) {
+  const paths = {
+    plus: <path d="M12 5v14M5 12h14" />,
+    refresh: <><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4" /><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" /></>,
+    download: <><path d="M12 3v12M7 10l5 5 5-5" /><path d="M5 21h14" /></>,
+    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2m10-10h-2M4 12H2m17.1-7.1-1.4 1.4M6.3 17.7l-1.4 1.4m0-14.2 1.4 1.4m11.4 11.4 1.4 1.4" /></>,
+    moon: <path d="M20.2 14.3A8.4 8.4 0 0 1 9.7 3.8 8.5 8.5 0 1 0 20.2 14.3Z" />,
+    pulse: <path d="M3 12h4l2-5 4 10 2-5h6" />,
+    close: <path d="m6 6 12 12M18 6 6 18" />,
+    arrow: <path d="M5 12h13m-5-5 5 5-5 5" />,
+  };
+  return <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
+
+function Status({ value }) { const [label, tone] = STATUS[value] || STATUS.PENDING; return <span className={`status ${tone}`}><i aria-hidden="true" />{label}</span>; }
+function Metric({ label, value, note, tone = "" }) { return <article className={`metric ${tone}`}><p>{label}</p><strong>{value ?? "—"}</strong>{note && <span>{note}</span>}</article>; }
+
+function ActivityChart({ items }) {
+  const maximum = Math.max(...items.map((item) => item.value), 1);
+  const points = items.length < 2 ? "" : items.map((item, index) => `${(index / (items.length - 1)) * 100},${100 - (item.value / maximum) * 82 - 9}`).join(" ");
+  return <section className="panel activity-chart" aria-labelledby="activity-title"><header><div><p className="panel-kicker">Seven days</p><h3 id="activity-title">Recorded activity</h3></div><p>Audit events written to SQLite</p></header>{items.length === 0 ? <p className="no-data">No recorded events in the last seven days.</p> : <><div className="chart-frame" role="img" aria-label={`Event activity: ${items.map((item) => `${item.label}, ${item.value}`).join("; ")}`}><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path className="chart-grid" d="M0 25H100M0 50H100M0 75H100" /><polyline className="chart-line" points={points || "50,50 50,50"} /></svg></div><div className="chart-axis">{items.map((item) => <span key={item.label}>{new Date(`${item.label}T00:00:00`).toLocaleDateString([], { weekday: "short" })}</span>)}</div><ol className="sr-only">{items.map((item) => <li key={item.label}>{item.label}: {item.value} events</li>)}</ol></>}</section>;
+}
+
+function FlowMap({ stageStates, selectedStage, onSelectStage }) {
+  const byStage = Object.fromEntries(stageStates.map((item) => [item.label, item]));
+  return <section className="panel flow-map" aria-labelledby="flow-map-title"><header><div><p className="panel-kicker">Protocol map</p><h3 id="flow-map-title">Where runs are now</h3></div><div className="flow-header-action">{selectedStage ? <button className="text-button utility" onClick={() => onSelectStage("")}>Clear stage</button> : <p>Click a stage to filter the registry</p>}</div></header><div className="flow-canvas" role="group" aria-label="Six-stage cell culture protocol. Stage nodes show active, running, waiting, and paused runs."><svg className="flow-connectors" viewBox="0 0 1200 120" preserveAspectRatio="none" aria-hidden="true"><defs><marker id="flow-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" /></marker></defs>{PIPELINE.slice(0, -1).map((stage, index) => <path key={stage} d={`M${(index + .5) * 200 + 56} 60 H${(index + 1.5) * 200 - 56}`} markerEnd="url(#flow-arrow)" />)}</svg><ol>{PIPELINE.map((stage, index) => { const state = byStage[stage] || { active: 0, running: 0, waiting: 0, paused: 0 }; const issueCount = state.waiting + state.paused; const tone = issueCount ? "is-attention" : state.running ? "is-running" : state.active ? "has-work" : ""; return <li className={tone} key={stage}><button className={selectedStage === stage ? "is-selected" : ""} aria-pressed={selectedStage === stage} onClick={() => onSelectStage(selectedStage === stage ? "" : stage)}><span className="flow-order">{String(index + 1).padStart(2, "0")}</span><strong>{stage}</strong><b>{state.active}</b><span className="flow-label">active</span><span className="flow-state"><i className="running" />{state.running} running <i className="waiting" />{issueCount} held</span></button></li>; })}</ol></div><ol className="sr-only">{PIPELINE.map((stage) => { const state = byStage[stage] || { active: 0, running: 0, waiting: 0, paused: 0 }; return <li key={stage}>{stage}: {state.active} active, {state.running} running, {state.waiting} waiting, {state.paused} paused.</li>; })}</ol></section>;
+}
+
+function FlowBrief({ stageStates, onSelectStage }) {
+  const active = stageStates.reduce((total, stage) => total + stage.active, 0); const held = stageStates.reduce((total, stage) => total + stage.waiting + stage.paused, 0); const busiest = [...stageStates].sort((a, b) => b.active - a.active)[0]; const heldStage = [...stageStates].sort((a, b) => (b.waiting + b.paused) - (a.waiting + a.paused))[0];
+  return <aside className="panel flow-brief" aria-labelledby="flow-brief-title"><header><div><p className="panel-kicker">Live readout</p><h3 id="flow-brief-title">Flow condition</h3></div><span className={held ? "attention" : "calm"}>{held ? "Review" : "Clear"}</span></header><dl><div><dt>In protocol</dt><dd>{active}</dd></div><div><dt>Held</dt><dd>{held}</dd></div></dl>{active ? <div className="flow-callout"><p>{held ? "Attention point" : "Most occupied"}</p><button onClick={() => onSelectStage((held ? heldStage : busiest).label)}><strong>{(held ? heldStage : busiest).label}</strong><span>{held ? `${heldStage.waiting + heldStage.paused} waiting or paused` : `${busiest.active} active runs`}</span><Icon name="arrow" size={16} /></button></div> : <p className="calm-state">No non-terminal runs are currently in the protocol.</p>}<p className="flow-note">Counts are calculated from the current SQLite run state. Connectors represent the defined protocol sequence.</p></aside>;
+}
+
+function formatAge(minutes) { if (minutes == null) return null; if (minutes < 60) return `${minutes}m`; if (minutes < 1440) return `${Math.round(minutes / 60)}h`; return `${Math.round(minutes / 1440)}d`; }
+function relativeTime(value) { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? "now" : minutes < 60 ? `${minutes}m ago` : minutes < 1440 ? `${Math.floor(minutes / 60)}h ago` : `${Math.floor(minutes / 1440)}d ago`; }
 
 export default function App() {
-  const [runs, setRuns] = useState([]);
-  const [totalRuns, setTotalRuns] = useState(0);
-  const [user, setUser] = useState(null);
-  const [webhooks, setWebhooks] = useState([]);
-  const [webhookUrl, setWebhookUrl] = useState("");
-  const [metrics, setMetrics] = useState({});
-  const [resources, setResources] = useState({ resources: {}, queue_depth: 0 });
-  const [selected, setSelected] = useState(null);
-  const [detail, setDetail] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [connection, setConnection] = useState("connecting");
-  const [error, setError] = useState("");
-  const [lastUpdated, setLastUpdated] = useState(null);
-  const [eventSearch, setEventSearch] = useState("");
-  const [hiddenEventTypes, setHiddenEventTypes] = useState(new Set());
-  const [eventLimit, setEventLimit] = useState(50);
-  const initialFilters = Object.fromEntries(new URLSearchParams(window.location.search));
-  const [filters, setFilters] = useState({ status: initialFilters.status || "", stage: initialFilters.stage || "", search: initialFilters.search || "", sort: initialFilters.sort || "created_at", direction: initialFilters.direction || "desc" });
-  const [theme, setTheme] = useState(() => localStorage.getItem("cellflow-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+  const [runs, setRuns] = useState([]); const [totalRuns, setTotalRuns] = useState(0); const [user, setUser] = useState(null); const [webhooks, setWebhooks] = useState([]); const [webhookUrl, setWebhookUrl] = useState(""); const [metrics, setMetrics] = useState({}); const [resources, setResources] = useState({ resources: {}, queue_depth: 0 });
+  const [analytics, setAnalytics] = useState({ statuses: [], stages: [], events: [], active_stages: [], stage_states: [], activity: [], summary: {}, recent_events: [] }); const [importFile, setImportFile] = useState(null); const [importError, setImportError] = useState(""); const [selected, setSelected] = useState(null); const [detail, setDetail] = useState(null); const [loading, setLoading] = useState(true); const [connection, setConnection] = useState("connecting"); const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [pending, setPending] = useState(""); const [lastUpdated, setLastUpdated] = useState(null); const [eventSearch, setEventSearch] = useState(""); const [hiddenTypes, setHiddenTypes] = useState(new Set()); const [eventLimit, setEventLimit] = useState(50);
+  const initialFilters = Object.fromEntries(new URLSearchParams(window.location.search)); const [filters, setFilters] = useState({ status: initialFilters.status || "", stage: initialFilters.stage || "", search: initialFilters.search || "", sort: initialFilters.sort || "created_at", direction: initialFilters.direction || "desc" }); const [theme, setTheme] = useState(() => localStorage.getItem("cellflow-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
 
-  useEffect(() => observeAuth((nextUser) => {
-    setUser(nextUser);
-    setAuthTokenProvider(() => nextUser?.getIdToken() || null);
-  }), []);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem("cellflow-theme", theme);
-  }, [theme]);
-
-  useEffect(() => {
-    const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value && value !== "created_at" && value !== "desc"));
-    window.history.replaceState(null, "", `${window.location.pathname}${query.size ? `?${query}` : ""}`);
-  }, [filters]);
+  useEffect(() => observeAuth((nextUser) => { setUser(nextUser); setAuthTokenProvider(() => nextUser?.getIdToken() || null); }), []);
+  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("cellflow-theme", theme); }, [theme]);
+  useEffect(() => { if (!notice) return undefined; const timeout = setTimeout(() => setNotice(""), 4000); return () => clearTimeout(timeout); }, [notice]);
+  useEffect(() => { const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value && value !== "created_at" && value !== "desc")); window.history.replaceState(null, "", window.location.pathname + (query.size ? `?${query}` : "")); }, [filters]);
 
   async function refresh() {
-    const [runResult, metricResult, resourceResult] = await Promise.allSettled([listRuns(filters), getMetrics(), getResources()]);
-    if (runResult.status === "fulfilled") {
-      setRuns(runResult.value.runs);
-      setTotalRuns(runResult.value.total);
-      setLastUpdated(new Date());
-      setError(metricResult.status === "rejected" ? "Metrics unavailable — showing run data." : "");
-    } else {
-      setError("API unreachable. Retrying…");
-      setConnection("disconnected");
-    }
-    if (metricResult.status === "fulfilled") setMetrics(metricResult.value);
-    if (resourceResult.status === "fulfilled") setResources(resourceResult.value);
-    try { setWebhooks(await listWebhooks()); } catch { /* optional dashboard panel */ }
-    if (selected != null) {
-      try { setDetail(await getRun(selected)); } catch { setError("Run detail unavailable."); }
-    }
-    setLoading(false);
+    const [runResult, metricResult, resourceResult, analyticsResult] = await Promise.allSettled([listRuns(filters), getMetrics(), getResources(), getAnalytics()]);
+    if (runResult.status === "fulfilled") { setRuns(runResult.value.runs); setTotalRuns(runResult.value.total); setLastUpdated(new Date()); setError(metricResult.status === "rejected" ? "Live runs loaded, but their supporting metrics could not be refreshed." : ""); } else { setError("The CellFlow API is unavailable. We’ll keep trying to reconnect."); setConnection("disconnected"); }
+    if (metricResult.status === "fulfilled") setMetrics(metricResult.value); if (resourceResult.status === "fulfilled") setResources(resourceResult.value); if (analyticsResult.status === "fulfilled") setAnalytics(analyticsResult.value); try { setWebhooks(await listWebhooks()); } catch { /* Webhooks are supplementary. */ } if (selected != null) try { setDetail(await getRun(selected)); } catch { setError("The selected run could not be refreshed."); } setLoading(false);
   }
-
-  useEffect(() => {
-    let source;
-    let retryTimer;
-    let attempts = 0;
-    const streamUrl = `${import.meta.env.VITE_API_URL || "http://localhost:8000"}/runs/stream`;
-    const connect = () => {
-      if (document.hidden) return;
-      source = new EventSource(streamUrl);
-      source.onopen = () => { attempts = 0; setConnection("connected"); setError(""); }; 
-      source.onmessage = async ({ data }) => {
-        const event = JSON.parse(data);
-        const update = await getRun(event.run_id);
-        setRuns((current) => current.map((run) => run.id === event.run_id ? update.run : run));
-        if (selected === event.run_id) setDetail(update);
-        getResources().then(setResources).catch(() => {});
-      };
-      source.onerror = () => {
-        source.close();
-        setConnection("reconnecting");
-        setError("Connection lost. Reconnecting…");
-        retryTimer = setTimeout(connect, Math.min(30000, 1000 * 2 ** attempts++));
-      };
-    };
-    const onVisibility = () => { source?.close(); clearTimeout(retryTimer); if (!document.hidden) connect(); };
-    refresh();
-    connect();
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => { source?.close(); clearTimeout(retryTimer); document.removeEventListener("visibilitychange", onVisibility); };
-    // refresh reads evolving filters and selected-run state; reconnecting on each update is undesirable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { let source; let reconnectTimer; let liveRefreshTimer; let attempts = 0; const streamUrl = `${import.meta.env.VITE_API_URL || "http://localhost:8000"}/runs/stream`; const connect = () => { if (document.hidden) return; source = new EventSource(streamUrl); source.onopen = () => { attempts = 0; setConnection("connected"); setError(""); }; source.onmessage = ({ data }) => { try { JSON.parse(data); } catch { return; } clearTimeout(liveRefreshTimer); liveRefreshTimer = setTimeout(refresh, 150); }; source.onerror = () => { source.close(); setConnection("reconnecting"); setError("Live connection lost. Reconnecting automatically…"); reconnectTimer = setTimeout(connect, Math.min(30000, 1000 * 2 ** attempts++)); }; }; const onVisibility = () => { source?.close(); clearTimeout(reconnectTimer); clearTimeout(liveRefreshTimer); if (!document.hidden) connect(); }; refresh(); connect(); document.addEventListener("visibilitychange", onVisibility); return () => { source?.close(); clearTimeout(reconnectTimer); clearTimeout(liveRefreshTimer); document.removeEventListener("visibilitychange", onVisibility); }; // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, filters]);
 
-  const events = detail?.events ?? [];
-  const eventTypes = [...new Set(events.map((event) => event.type))].sort();
-  const visibleEvents = events.filter((event) => !hiddenEventTypes.has(event.type) && event.message.toLowerCase().includes(eventSearch.toLowerCase())).slice(0, eventLimit);
-  const eventColor = (type) => ({ step_started: "blue", step_done: "green", retry: "yellow", failed: "red", completed: "green-bold", decision: "purple", passage: "orange", queued: "gray" }[type] || "gray");
-  const relativeTime = (time) => { const seconds = Math.max(0, (Date.now() - new Date(time)) / 1000); return seconds < 60 ? "just now" : seconds < 3600 ? `${Math.floor(seconds / 60)}m ago` : `${Math.floor(seconds / 3600)}h ago`; };
+  const eventTypes = useMemo(() => [...new Set((detail?.events ?? []).map((event) => event.type))].sort(), [detail]); const matchingEvents = (detail?.events ?? []).filter((event) => !hiddenTypes.has(event.type) && event.message.toLowerCase().includes(eventSearch.toLowerCase())); const attentionRuns = runs.filter((run) => ["WAITING", "PAUSED", "FAILED"].includes(run.status)); const visibleEvents = matchingEvents.slice(0, eventLimit); const summary = analytics.summary || {}; const eventTone = (type) => ({ step_started: "info", step_done: "success", retry: "warning", failed: "danger", completed: "success", decision: "decision", passage: "passage" }[type] || "neutral"); const updateFilters = (next) => setFilters((current) => ({ ...current, ...next }));
+  async function perform(key, message, action) { setPending(key); setNotice(""); try { await action(); setNotice(message); await refresh(); } catch { setError("That action could not be completed. Check your connection and try again."); } finally { setPending(""); } }
+  async function submitImport(event) { event.preventDefault(); if (!importFile) { setImportError("Choose a CSV file with a name column before importing."); return; } setPending("import"); setImportError(""); setNotice(""); try { const result = await importRuns(importFile); setImportFile(null); setNotice(`${result.created} ${result.created === 1 ? "run" : "runs"} imported.`); await refresh(); } catch { setImportError("Import failed. Use a UTF-8 CSV with one name column and up to 100 rows."); } finally { setPending(""); } }
 
-  return (
-    <div className="wrap">
-      <header>
-        <h1>CellFlow</h1>
-        <span className="sub">lab-workflow orchestrator</span>
-        <span className={`connection ${connection}`}><i />{connection}</span>
-        {lastUpdated && <span className="updated">updated {lastUpdated.toLocaleTimeString()}</span>}
-        <div className="metrics">
-          <span>{metrics.runs_active ?? 0} active</span>
-          <span>{metrics.runs_completed ?? 0} done</span>
-          <span className="fail">{metrics.runs_failed ?? 0} failed</span>
-          <span>{metrics.retries_total ?? 0} retries</span>
-          <span>{metrics.audit_events_total ?? 0} events</span>
-        </div>
-        <button onClick={async () => { await startRun(); refresh(); }}>+ Start run</button>
-        <button onClick={refresh}>Retry</button>
-        <button onClick={() => exportRuns()}>Export runs</button>
-        {firebaseEnabled && (user ? <button onClick={signOutUser}>Sign out {user.displayName || user.email}</button> : <button onClick={signInWithGoogle}>Sign in with Google</button>)}
-        <button className="theme-toggle" aria-label="Toggle color theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? "☀" : "☾"}</button>
-      </header>
-
-      <section className="resource-panel">
-        {Object.entries(resources.resources).map(([name, resource]) => <div className="resource" key={name}><span>{name}</span><b>{resource.used}/{resource.capacity}</b><div className={`utilization ${resource.used / resource.capacity > .8 ? "high" : resource.used / resource.capacity >= .5 ? "medium" : "low"}`}><i style={{ width: `${resource.used / resource.capacity * 100}%` }} /></div></div>)}
-        <div className="resource queue"><span>Queue depth</span><b>{resources.queue_depth}</b></div>
-      </section>
-      {error && <div className="connection-error" role="alert">{error}</div>}
-      <div className="filter-bar">
-        <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}><option value="">All statuses</option>{["RUNNING", "WAITING", "PENDING", "COMPLETED", "FAILED"].map((value) => <option key={value}>{value}</option>)}</select>
-        <select value={filters.stage} onChange={(event) => setFilters({ ...filters, stage: event.target.value })}><option value="">All stages</option>{["Seed", "Incubate", "Image", "Count", "Decision", "Passage"].map((value) => <option key={value}>{value}</option>)}</select>
-        <input placeholder="Search runs" value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} />
-        <select value={`${filters.sort}:${filters.direction}`} onChange={(event) => { const [sort, direction] = event.target.value.split(":"); setFilters({ ...filters, sort, direction }); }}><option value="created_at:desc">Newest</option><option value="created_at:asc">Oldest</option><option value="name:asc">Name A-Z</option><option value="name:desc">Name Z-A</option></select>
-      </div>
-      <p className="result-count">Showing {runs.length} of {totalRuns} runs</p>
-      <div className="grid">
-        {loading && Array.from({ length: 6 }, (_, index) => <div className="card skeleton" key={index} />)}
-        {!loading && runs.length === 0 && <div className="empty-state">No runs yet. Start a run to begin the protocol.</div>}
-        {!loading && runs.map((r) => (
-          <div
-            key={r.id}
-            className={`card ${selected === r.id ? "active" : ""}`}
-            onClick={() => setSelected(r.id)}
-          >
-            <div className="card-top">
-              <strong>{r.name}</strong>
-              <span className="status" style={{ background: STATUS_COLORS[r.status] }}>
-                {r.status}
-              </span>
-            </div>
-            <div className="stage" style={{ color: STAGE_COLORS[r.stage_name] }}>
-              {r.stage_name} · passage {r.passage_count}
-            </div>
-            <Pipeline run={r} />
-            <Bar value={r.confluence} />
-            <div className="run-actions" onClick={(e) => e.stopPropagation()}>
-              <button disabled={!['PENDING', 'WAITING', 'RUNNING'].includes(r.status)} onClick={async () => { await pauseRun(r.id); refresh(); }}>Pause</button>
-              <button disabled={r.status !== 'PAUSED'} onClick={async () => { await resumeRun(r.id); refresh(); }}>Resume</button>
-              <button className="cancel" disabled={['COMPLETED', 'FAILED', 'CANCELLED'].includes(r.status)} onClick={async () => { await cancelRun(r.id); refresh(); }}>Cancel</button>
-            </div>
-            <button className="fault" onClick={(e) => { e.stopPropagation(); injectFault(r.id); }}>Inject fault</button>
-            <button className="export" onClick={(e) => { e.stopPropagation(); exportRun(r.id); }}>Export</button>
-          </div>
-        ))}
-      </div>
-
-      <section className="webhook-panel">
-        <h2>Webhooks</h2>
-        <form onSubmit={async (event) => { event.preventDefault(); await createWebhook({ url: webhookUrl, events: ["run.failed", "run.completed"] }); setWebhookUrl(""); setWebhooks(await listWebhooks()); }}>
-          <input aria-label="Webhook URL" type="url" required placeholder="https://example.com/hook" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} />
-          <button>Add webhook</button>
-        </form>
-        <ul>{webhooks.map((hook) => <li key={hook.id}>{hook.url} <button onClick={async () => { await testWebhook(hook.id); }}>Test</button> <button onClick={async () => { await deleteWebhook(hook.id); setWebhooks(await listWebhooks()); }}>Delete</button></li>)}</ul>
-      </section>
-
-      {detail && (
-        <div className="detail">
-          <h2>{detail.run.name} — audit log</h2>
-          <div className="event-controls"><input aria-label="Search audit events" placeholder="Search events" value={eventSearch} onChange={(event) => { setEventSearch(event.target.value); setEventLimit(50); }} /><div className="filter-chips">{eventTypes.map((type) => <button key={type} className={hiddenEventTypes.has(type) ? "is-hidden" : ""} onClick={() => { setHiddenEventTypes((current) => { const next = new Set(current); next.has(type) ? next.delete(type) : next.add(type); return next; }); setEventLimit(50); }}>{type}</button>)}</div></div>
-          <ul className="timeline">{visibleEvents.map((ev) => <li key={ev.id} className={`event event-${eventColor(ev.type)}`}><time title={new Date(ev.created_at).toLocaleString()}>{relativeTime(ev.created_at)}</time><span className="ev-type">{ev.type}</span><span>{ev.message}</span></li>)}</ul>
-          {events.filter((event) => !hiddenEventTypes.has(event.type) && event.message.toLowerCase().includes(eventSearch.toLowerCase())).length > eventLimit && <button onClick={() => setEventLimit((limit) => limit + 50)}>Load more</button>}
-        </div>
-      )}
-    </div>
-  );
+  return <div className="app-shell"><a className="skip-link" href="#workspace">Skip to workspace</a><header className="topbar"><div className="brand"><span className="brand-mark" aria-hidden="true"><Icon name="pulse" /></span><div><p>CellFlow</p><h1>Operations</h1></div></div><nav aria-label="Workspace navigation"><a className="active" href="#overview">Overview</a><a href="#runs">Runs</a><a href="#data">Data</a></nav><div className="topbar-actions"><span className={`connection ${connection}`} role="status"><i aria-hidden="true" />{connection === "connected" ? "Live" : connection === "reconnecting" ? "Reconnecting" : "Offline"}</span>{firebaseEnabled && (user ? <button className="button quiet" onClick={() => signOutUser()}>Sign out</button> : <button className="button quiet" onClick={() => signInWithGoogle()}>Sign in</button>)}<button className="icon-button" aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}><Icon name={theme === "dark" ? "sun" : "moon"} /></button></div></header>
+    <main id="workspace" className="workspace" tabIndex="-1"><section className="command-header" id="overview" aria-labelledby="workspace-title"><div><p className="eyebrow">Live laboratory workflow</p><h2 id="workspace-title">Know what needs attention.</h2><p>Runs, capacity, and audit history—updated as the protocol moves.</p></div><div className="command-actions"><span className="last-updated">{lastUpdated ? `Synced ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Syncing"}</span><button className="button secondary" disabled={pending === "refresh"} onClick={() => perform("refresh", "Dashboard refreshed.", refresh)}><Icon name="refresh" /> Refresh</button><button className="button primary" disabled={pending === "start"} onClick={() => perform("start", "New run started.", startRun)}>{pending === "start" ? "Starting…" : <><Icon name="plus" /> New run</>}</button></div></section>
+      <section className="metrics" aria-label="Operational summary"><Metric label="Active runs" value={summary.active_runs ?? metrics.runs_active} note="In progress or waiting" tone="blue" /><Metric label="Completion rate" value={summary.completion_rate == null ? "—" : `${summary.completion_rate}%`} note="Of terminal runs" tone="green" /><Metric label="Active age" value={formatAge(summary.average_active_age_minutes) ?? "—"} note="Mean time since creation" /><Metric label="Events / 24h" value={summary.events_last_24h ?? "—"} note="Recorded activity" tone="amber" /><Metric label="Step duration" value={summary.average_step_duration_minutes == null ? "—" : `${summary.average_step_duration_minutes}m`} note="Mean completed step" /></section>
+      <section className="flow-overview" aria-label="Workflow overview"><FlowMap stageStates={analytics.stage_states || []} selectedStage={filters.stage} onSelectStage={(stage) => updateFilters({ stage })} /><FlowBrief stageStates={analytics.stage_states || []} onSelectStage={(stage) => updateFilters({ stage })} /></section>
+      <section className="overview-grid" aria-label="Recorded analytics"><ActivityChart items={analytics.activity || []} /><aside className="panel watchlist" aria-labelledby="watchlist-title"><header><div><p className="panel-kicker">Exceptions</p><h3 id="watchlist-title">Needs review</h3></div><span>{attentionRuns.length}</span></header>{attentionRuns.length ? <ol>{attentionRuns.slice(0, 4).map((run) => <li key={run.id}><button onClick={() => setSelected(run.id)}><span><strong>{run.name}</strong><small>{run.stage_name}</small></span><Status value={run.status} /><Icon name="arrow" size={16} /></button></li>)}</ol> : <p className="calm-state">No queued, paused, or failed runs in this view.</p>}</aside><section className="panel event-feed" aria-labelledby="event-feed-title"><header><div><p className="panel-kicker">Audit feed</p><h3 id="event-feed-title">Latest recorded events</h3></div><p>Newest first</p></header>{analytics.recent_events?.length ? <ol>{analytics.recent_events.map((event) => <li key={event.id}><time dateTime={event.created_at}>{relativeTime(event.created_at)}</time><div><strong>{event.run_name}</strong><p>{event.message}</p></div><span className={`event-dot ${eventTone(event.type)}`} aria-label={event.type} /></li>)}</ol> : <p className="no-data">Events will appear here once a run starts.</p>}</section></section>
+      {(error || notice) && <div className={`notice ${error ? "error" : "success"}`} role="status" aria-live="polite"><span>{error || notice}</span>{error && <button className="icon-button compact" aria-label="Dismiss message" onClick={() => setError("")}><Icon name="close" size={16} /></button>}</div>}
+      <section className="runs-section" id="runs" aria-labelledby="runs-title"><div className="section-heading"><div><p className="eyebrow">Run registry</p><h2 id="runs-title">All cell line runs</h2><p>Showing {runs.length} of {totalRuns} records</p></div><button className="button quiet" onClick={() => exportRuns()}><Icon name="download" /> Export CSV</button></div><div className="filter-panel" aria-label="Filter runs"><label><span>Status</span><select value={filters.status} onChange={(event) => updateFilters({ status: event.target.value })}><option value="">All statuses</option>{Object.keys(STATUS).map((value) => <option key={value} value={value}>{STATUS[value][0]}</option>)}</select></label><label><span>Stage</span><select value={filters.stage} onChange={(event) => updateFilters({ stage: event.target.value })}><option value="">All stages</option>{PIPELINE.map((value) => <option key={value}>{value}</option>)}</select></label><label className="search-field"><span>Find a run</span><input placeholder="Search by name" value={filters.search} onChange={(event) => updateFilters({ search: event.target.value })} /></label><label><span>Order by</span><select value={`${filters.sort}:${filters.direction}`} onChange={(event) => { const [sort, direction] = event.target.value.split(":"); updateFilters({ sort, direction }); }}><option value="created_at:desc">Newest first</option><option value="created_at:asc">Oldest first</option><option value="name:asc">Name A–Z</option><option value="name:desc">Name Z–A</option></select></label></div><div className="run-table" aria-busy={loading}><div className="run-table-head"><span>Run</span><span>Status</span><span>Stage</span><span>Confluence</span><span>Created</span><span>Actions</span></div>{loading && Array.from({ length: 5 }, (_, index) => <div className="run-row skeleton" key={index} aria-hidden="true" />)}{!loading && !runs.length && <div className="empty-state"><span className="empty-icon" aria-hidden="true"><Icon name="pulse" size={26} /></span><h3>No runs match this view</h3><p>Adjust the filters or import a CSV to add real data.</p></div>}{!loading && runs.map((run) => <article className={`run-row ${selected === run.id ? "selected" : ""}`} key={run.id}><button className="run-link" onClick={() => setSelected(run.id)} aria-expanded={selected === run.id} aria-controls={selected === run.id ? "run-detail" : undefined}><span className="run-id">RUN-{String(run.id).padStart(3, "0")}</span><strong>{run.name}</strong></button><Status value={run.status} /><span className="stage-cell"><b>{String(PIPELINE.indexOf(run.stage_name) + 1).padStart(2, "0")}</b>{run.stage_name}</span><span className="confluence-cell"><i><em style={{ width: `${Math.round(run.confluence * 100)}%` }} /></i>{Math.round(run.confluence * 100)}%</span><time dateTime={run.created_at}>{relativeTime(run.created_at)}</time><div className="row-actions"><button className="text-button" disabled={!['PENDING', 'WAITING', 'RUNNING'].includes(run.status) || pending === `run-${run.id}-pause`} onClick={() => perform(`run-${run.id}-pause`, `${run.name} paused.`, () => pauseRun(run.id))}>Pause</button><button className="text-button" disabled={run.status !== 'PAUSED' || pending === `run-${run.id}-resume`} onClick={() => perform(`run-${run.id}-resume`, `${run.name} resumed.`, () => resumeRun(run.id))}>Resume</button><button className="text-button danger" disabled={['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status) || pending === `run-${run.id}-cancel`} onClick={() => { if (window.confirm(`Cancel ${run.name}? This cannot be resumed.`)) perform(`run-${run.id}-cancel`, `${run.name} cancelled.`, () => cancelRun(run.id)); }}>Cancel</button><button className="text-button utility" disabled={pending === `run-${run.id}-fault`} onClick={() => perform(`run-${run.id}-fault`, "Fault queued for the next step.", () => injectFault(run.id))}>Fault</button><button className="text-button utility" onClick={() => exportRun(run.id)}><Icon name="download" size={14} /></button></div></article>)}</div></section>
+      <section className="support-grid" id="data"><section className="panel import-panel" aria-labelledby="import-title"><header><div><p className="panel-kicker">Data source</p><h3 id="import-title">Import real runs</h3></div><p>Saved in SQLite</p></header><p>Upload UTF-8 CSV with one required <code>name</code> column. A maximum of 100 rows is accepted per file.</p><form onSubmit={submitImport}><label htmlFor="run-import"><span>CSV file</span><input id="run-import" type="file" accept=".csv,text/csv" onChange={(event) => { setImportFile(event.target.files?.[0] || null); setImportError(""); }} /></label>{importFile && <p className="selected-file">{importFile.name} · {(importFile.size / 1024).toFixed(1)} KB</p>}{importError && <p className="field-error" role="alert">{importError}</p>}<button className="button primary" disabled={!importFile || pending === "import"}>{pending === "import" ? "Importing…" : "Import CSV"}</button></form></section><section className="panel capacity-panel" aria-labelledby="capacity-title"><header><div><p className="panel-kicker">Capacity</p><h3 id="capacity-title">Available resources</h3></div><span className="queue-count">{resources.queue_depth} waiting</span></header><div className="resource-grid">{Object.entries(resources.resources).map(([name, resource]) => { const ratio = resource.capacity ? resource.used / resource.capacity : 0; return <div className="resource" key={name}><div><strong>{name}</strong><span>{resource.capacity - resource.used} available</span></div><b>{resource.used}/{resource.capacity}</b><i><em style={{ width: `${ratio * 100}%` }} /></i></div>; })}</div></section></section>
+      <section className="panel webhook-panel" aria-labelledby="webhooks-title"><header><div><p className="panel-kicker">Notifications</p><h3 id="webhooks-title">Webhook delivery</h3></div><p>Completion and failure events</p></header><form className="webhook-form" onSubmit={(event) => { event.preventDefault(); perform("webhook", "Webhook added.", async () => { await createWebhook({ url: webhookUrl, events: ["run.failed", "run.completed"] }); setWebhookUrl(""); }); }}><label className="search-field" htmlFor="webhook-url"><span>Webhook URL</span><input id="webhook-url" type="url" required placeholder="https://example.com/hooks/cellflow" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} /></label><button className="button secondary" disabled={pending === "webhook"}>{pending === "webhook" ? "Adding…" : "Add webhook"}</button></form>{webhooks.length > 0 && <ul className="webhook-list">{webhooks.map((hook) => <li key={hook.id}><span>{hook.url}</span><div><button className="text-button utility" onClick={() => perform(`test-hook-${hook.id}`, "Test webhook sent.", () => testWebhook(hook.id))}>Test</button><button className="text-button danger" onClick={() => { if (window.confirm("Delete this webhook?")) perform(`delete-hook-${hook.id}`, "Webhook deleted.", () => deleteWebhook(hook.id)); }}>Delete</button></div></li>)}</ul>}</section>
+      {detail && <aside className="detail-panel" id="run-detail" aria-labelledby="detail-title"><div className="detail-header"><div><p className="eyebrow">Run record</p><h2 id="detail-title">{detail.run.name}</h2><p>Audit timeline</p></div><button className="icon-button" aria-label="Close run detail" onClick={() => { setSelected(null); setDetail(null); }}><Icon name="close" /></button></div><div className="event-toolbar"><label className="search-field"><span>Search timeline</span><input placeholder="Search event messages" value={eventSearch} onChange={(event) => { setEventSearch(event.target.value); setEventLimit(50); }} /></label><div className="filter-chips" aria-label="Event type filters">{eventTypes.map((type) => <button key={type} className={hiddenTypes.has(type) ? "is-hidden" : ""} aria-pressed={!hiddenTypes.has(type)} onClick={() => { setHiddenTypes((current) => { const next = new Set(current); next.has(type) ? next.delete(type) : next.add(type); return next; }); setEventLimit(50); }}>{type.replaceAll("_", " ")}</button>)}</div></div><ol className="timeline">{visibleEvents.map((event) => <li className={`event ${eventTone(event.type)}`} key={event.id}><time title={new Date(event.created_at).toLocaleString()} dateTime={event.created_at}>{relativeTime(event.created_at)}</time><span>{event.type.replaceAll("_", " ")}</span><p>{event.message}</p></li>)}</ol>{matchingEvents.length > eventLimit && <button className="button secondary load-more" onClick={() => setEventLimit((limit) => limit + 50)}>Load 50 more events</button>}</aside>}</main>
+  </div>;
 }
